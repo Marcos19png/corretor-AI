@@ -51,18 +51,23 @@ def main():
         st.text_area("", texto_extraido, height=300)
 
         # Opção para download do texto como PDF
-if st.button("Download do Texto em PDF"):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_font("Arial", size=12)
-    for linha in texto_extraido.split('\n'):
-        linha_corrigida = linha.encode('latin-1', 'replace').decode('latin-1')
-        pdf.multi_cell(0, 10, linha_corrigida)
-    caminho_pdf = os.path.join("temp", "texto_extraido.pdf")
-    pdf.output(caminho_pdf)
-    with open(caminho_pdf, "rb") as f:
-        st.download_button("Clique para baixar", f, file_name="texto_extraido.pdf")
+        if st.button("Download do Texto em PDF"):
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.set_font("Arial", size=12)
+
+            # Substituir caracteres não compatíveis
+            texto_corrigido = texto_extraido.encode("latin-1", "replace").decode("latin-1")
+
+            for linha in texto_corrigido.split('\n'):
+                pdf.multi_cell(0, 10, linha)
+
+            caminho_pdf = os.path.join("temp", "texto_extraido.pdf")
+            pdf.output(caminho_pdf)
+
+            with open(caminho_pdf, "rb") as f:
+                st.download_button("Clique para baixar", f, file_name="texto_extraido.pdf")
 
         # Limpar arquivos temporários
         os.remove(caminho_arquivo)
