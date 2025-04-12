@@ -3,59 +3,64 @@ from PIL import Image
 import pytesseract
 import fitz  # PyMuPDF
 import difflib
+import re
 
 st.set_page_config(page_title="Corretor IA", layout="centered")
-st.title("Corretor de Provas com IA — Comparação Inteligente")
+st.title("Corretor de Provas com IA — Correção por Etapas")
 
-# OCR para imagem
+# Função para extrair texto de imagens
 def ocr_image(image):
     return pytesseract.image_to_string(image, lang="por")
 
-# OCR para PDF
+# Função para extrair texto de PDFs
 def ocr_pdf(file):
     text = ""
     doc = fitz.open(stream=file.read(), filetype="pdf")
     for page in doc:
-        pix = page.get_pixmap()
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        text += ocr_image(img) + "\n"
+        text += page.get_text()
     return text
 
-# Normalização de texto
+# Função para normalizar texto
 def normalize(text):
     return ''.join(e.lower() for e in text if e.isalnum() or e.isspace()).strip()
 
-# Comparação com tolerância
-def corrigir_resposta(resposta, gabarito):
-    partes = gabarito.split(";")
-    total = len(partes)
-    score = 0.0
-    for parte in partes:
-        parte_norm = normalize(parte)
-        resposta_norm = normalize(resposta)
+# Função para comparar respostas com tolerância
+def compare_responses(resposta, gabarito):
+    resposta_norm = normalize(resposta)
+    gabarito_norm = normalize(gabarito)
+    similarity = difflib.SequenceMatcher(None, resposta_norm, gabarito_norm).ratio()
+    return similarity >= 0.85  # Aceita 85% de similaridade
 
-        similarity = difflib.SequenceMatcher(None, parte_norm, resposta_norm).ratio()
-        if similarity >= 0.85:  # aceita 85% de similaridade
-            score += 1 / total
-    return round(score, 2)
+# Função para processar o gabarito
+def process_gabarito(text):
+    questoes = {}
+    lines = text.strip().split('\n')
+    current_q = ""
+    for line in lines:
+        if line.startswith("Q"):
+            current_q = line.strip(":")
+            questoes[current_q] = []
+        elif "=" in line:
+            partes = line.split("=")
+            if len(partes) == 2:
+                conteudo = partes[0].strip()
+                peso = float(partes[1].strip())
+                questoes[current_q].append((conteudo, peso))
+    return questoes
 
-# Upload de gabarito
-st.subheader("1. Envie o Gabarito (imagem ou PDF)")
-gabarito_file = st.file_uploader("Gabarito", type=["pdf", "png", "jpg", "jpeg"])
+# Upload do gabarito
+st.subheader("1. Envie o Gabarito (PDF estruturado)")
+gabarito_file = st.file_uploader("Gabarito", type=["pdf"])
 
-# Upload de provas
-st.subheader("2. Envie as Provas dos Alunos (vários arquivos)")
-aluno_files = st.file_uploader("Arquivos dos alunos", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+# Upload das provas dos alunos
+st.subheader("2. Envie as Provas dos Alunos (imagens ou PDFs)")
+aluno_files = st.file_uploader("Provas dos Alunos", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
-# Correção
 if gabarito_file and aluno_files:
-    if gabarito_file.name.endswith(".pdf"):
-        gabarito_text = ocr_pdf(gabarito_file)
-    else:
-        gabarito_text = ocr_image(Image.open(gabarito_file))
+    gabarito_text = ocr_pdf(gabarito_file)
+    questoes = process_gabarito(gabarito_text)
 
-    st.success("Gabarito lido!")
-    gabarito_text = st.text_area("Texto do Gabarito (separar por ;)", value=gabarito_text, height=150)
+    st.success("Gabarito processado com sucesso!")
 
     st.subheader("3. Resultados")
 
@@ -67,9 +72,18 @@ if gabarito_file and aluno_files:
         else:
             resposta_text = ocr_image(Image.open(aluno_file))
 
-        nota = corrigir_resposta(resposta_text, gabarito_text)
-        status = "Aprovado" if nota >= 0.6 else "Reprovado"
+        nota_total = 0.0
+        nota_maxima = 0.0
 
-        st.markdown(f"**{idx+1}. {nome_aluno}** — Nota: `{nota * 10:.1f}` — **{status}**")
+        for q, etapas in questoes.items():
+            for etapa_texto, peso in etapas:
+                if compare_responses(resposta_text, etapa_texto):
+                    nota_total += peso
+                nota_maxima += peso
+
+        nota_final = (nota_total / nota_maxima) * 10 if nota_maxima > 0 else 0
+        status = "Aprovado" if nota_final >= 6 else "Reprovado"
+
+        st.markdown(f"**{idx+1}. {nome_aluno}** — Nota: `{nota_final:.1f}` — **{status}**")
         with st.expander("Ver resposta extraída"):
             st.text(resposta_text)
