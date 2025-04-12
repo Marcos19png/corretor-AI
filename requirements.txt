@@ -1,3 +1,4 @@
+streamlit
 PyPDF2
 pytesseract
 Pillow
@@ -5,4 +6,4 @@ fpdf
 PyMuPDF
 pandas
 openpyxl
-streamlit
+XlsxWriter
