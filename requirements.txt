@@ -6,3 +6,4 @@ fpdf
 pdfplumber
 pandas
 openpyxl
+tqdm
