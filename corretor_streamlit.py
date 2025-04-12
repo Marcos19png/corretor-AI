@@ -1,56 +1,56 @@
-import streamlit as st
-import pytesseract
-import shutil
-from PIL import Image
-from fpdf import FPDF
-import tempfile
-import os
+# Função para extrair texto de um PDF
+def extrair_texto_pdf(pdf_path):
+imagens = convert_from_path(pdf_path)
+texto_total = ""
+for imagem in imagens:
+texto_total += pytesseract.image_to_string(imagem, lang='por')
+return texto_total
 
-# Configura o caminho do Tesseract
-pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
-
-def ocr_image(image):
-    return pytesseract.image_to_string(image, lang='por')
-
-def generate_pdf(text, filename):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    for line in text.split('\n'):
-        pdf.cell(200, 10, txt=line, ln=True)
-    pdf.output(filename)
-
+# Interface do Streamlit
 def main():
-    st.title("Corretor de Provas com OCR")
-    uploaded_file = st.file_uploader("Envie a imagem ou PDF da prova", type=["png", "jpg", "jpeg", "pdf"])
+st.title("Corretor AI")
 
-    if uploaded_file is not None:
-        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            tmp_file_path = tmp_file.name
+arquivo = st.file_uploader("Faça upload de um arquivo PDF ou imagem", type=["pdf", "png", "jpg", "jpeg"])
 
-        if uploaded_file.type == "application/pdf":
-            from pdf2image import convert_from_path
-            images = convert_from_path(tmp_file_path)
-            text = ""
-            for img in images:
-                text += ocr_image(img)
-        else:
-            image = Image.open(tmp_file_path)
-            text = ocr_image(image)
+if arquivo is not None:
+nome_arquivo = arquivo.name
+caminho_arquivo = os.path.join("temp", nome_arquivo)
 
-        st.text_area("Texto extraído:", text, height=300)
+# Criar diretório temporário se não existir
+os.makedirs("temp", exist_ok=True)
 
-        if st.button("Gerar PDF"):
-            output_pdf = "relatorio.pdf"
-            generate_pdf(text, output_pdf)
-            with open(output_pdf, "rb") as file:
-                btn = st.download_button(
-                    label="Baixar relatório em PDF",
-                    data=file,
-                    file_name=output_pdf,
-                    mime="application/pdf"
-                )
+# Salvar o arquivo enviado
+with open(caminho_arquivo, "wb") as f:
+f.write(arquivo.getbuffer())
 
-if _name_ == "_main_":
-    main()
+# Determinar o tipo de arquivo e extrair texto
+if nome_arquivo.lower().endswith(".pdf"):
+texto_extraido = extrair_texto_pdf(caminho_arquivo)
+else:
+imagem = Image.open(caminho_arquivo)
+texto_extraido = extrair_texto_imagem(imagem)
+
+# Exibir o texto extraído
+st.subheader("Texto Extraído:")
+st.text_area("", texto_extraido, height=300)
+
+# Opção para download do texto como PDF
+if st.button("Download do Texto em PDF"):
+pdf = FPDF()
+pdf.add_page()
+pdf.set_auto_page_break(auto=True, margin=15)
+pdf.set_font("Arial", size=12)
+for linha in texto_extraido.split('\n'):
+pdf.cell(200, 10, txt=linha, ln=True)
+caminho_pdf = os.path.join("temp", "texto_extraido.pdf")
+pdf.output(caminho_pdf)
+with open(caminho_pdf, "rb") as f:
+st.download_button("Clique para baixar", f, file_name="texto_extraido.pdf")
+
+# Limpar arquivos temporários
+os.remove(caminho_arquivo)
+if os.path.exists("temp/texto_extraido.pdf"):
+os.remove("temp/texto_extraido.pdf")
+
+if __name__ == "__main__":
+main()
