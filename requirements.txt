@@ -1,5 +1,8 @@
-streamlit
+PyPDF2
 pytesseract
-pillow
+Pillow
 fpdf
-PyMuPDF==1.23.7
+PyMuPDF
+pandas
+openpyxl
+streamlit
