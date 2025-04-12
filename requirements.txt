@@ -2,4 +2,4 @@ streamlit
 pytesseract
 pillow
 fpdf
-PyMuPDF
+PyMuPDF==1.23.7
