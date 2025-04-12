@@ -1,3 +1,19 @@
+import streamlit as st
+import pytesseract
+import shutil
+from pdf2image import convert_from_path
+from PIL import Image
+from fpdf import FPDF
+import os
+
+# Configurar o caminho do Tesseract
+pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
+
+# Função para extrair texto de uma imagem
+def extrair_texto_imagem(imagem):
+texto = pytesseract.image_to_string(imagem, lang='por')
+return texto
+
 # Função para extrair texto de um PDF
 def extrair_texto_pdf(pdf_path):
 imagens = convert_from_path(pdf_path)
