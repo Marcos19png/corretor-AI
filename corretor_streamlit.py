@@ -1,5 +1,4 @@
 import streamlit as st
-import pytesseract
 import shutil
 from PIL import Image
 from fpdf import FPDF
