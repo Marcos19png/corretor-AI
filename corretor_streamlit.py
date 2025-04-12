@@ -1,37 +1,38 @@
 import streamlit as st
-import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
+import fitz  # PyMuPDF
 from fpdf import FPDF
-import os
-import tempfile
-import re
+import io
 
-pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
+# Função para extrair texto de imagem
+def extrair_texto_imagem(uploaded_file):
+    image = Image.open(uploaded_file)
+    return pytesseract.image_to_string(image, lang='por')
 
-# Função para extrair texto
-def extrair_texto(arquivo):
-    if arquivo.type == "application/pdf":
-        doc = fitz.open(stream=arquivo.read(), filetype="pdf")
-        texto = ""
-        for pagina in doc:
-            texto += pagina.get_text()
-        return texto
-    else:
-        imagem = Image.open(arquivo)
-        return pytesseract.image_to_string(imagem, lang="por")
+# Função para extrair texto de PDF
+def extrair_texto_pdf(uploaded_file):
+    texto = ""
+    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            texto += page.get_text()
+    return texto
 
-# Divide o texto em blocos por questão
+# Extrair palavras-chave do gabarito (ignorando palavras curtas)
+def extrair_palavras_chave(texto):
+    palavras = texto.lower().split()
+    return [p.strip(".,:;()") for p in palavras if len(p) > 3]
+
+# Separar as respostas por questão (identificadas por "Questão")
 def separar_questoes(texto):
-    padrao = r"(Questão\s*\d+)[\s\S]*?(?=Questão\s*\d+|$)"
-    return re.findall(padrao, texto, re.IGNORECASE)
+    partes = texto.split("Questão")
+    questoes = []
+    for parte in partes[1:]:
+        corpo = parte.split(":", 1)[-1].strip()
+        questoes.append(corpo)
+    return questoes
 
-# Extrai palavras-chave simples de cada resposta do gabarito
-def extrair_palavras_chave(resposta):
-    palavras = re.findall(r"\b[a-zA-Z0-9çÇáéíóúãõâêîôûÁÉÍÓÚÂÊÎÔÛÃÕ]+\b", resposta)
-    return set(p.lower() for p in palavras if len(p) > 3)
-
-# Compara com base em palavras-chave
+# Função principal de comparação
 def comparar_respostas(gabarito_texto, aluno_texto, pesos, nota_minima):
     gabarito_questoes = separar_questoes(gabarito_texto)
     aluno_questoes = separar_questoes(aluno_texto)
@@ -42,9 +43,16 @@ def comparar_respostas(gabarito_texto, aluno_texto, pesos, nota_minima):
     for i, gq in enumerate(gabarito_questoes):
         aq = aluno_questoes[i] if i < len(aluno_questoes) else ""
         peso = pesos[i] if i < len(pesos) else 1
-        chave = extrair_palavras_chave(gq)
-        acertou = sum(1 for p in chave if p in aq.lower())
-        nota = (acertou / len(chave)) * peso if chave else 0
+
+        # Comparação direta (normaliza espaços e caixa)
+        if gq.strip().lower() == aq.strip().lower():
+            nota = peso
+        else:
+            # Correção por palavras-chave
+            chave = extrair_palavras_chave(gq)
+            acertou = sum(1 for p in chave if p in aq.lower())
+            nota = (acertou / len(chave)) * peso if chave else 0
+
         total += nota
         resultados.append((i+1, round(nota, 2), peso, gq.strip(), aq.strip()))
 
@@ -52,54 +60,34 @@ def comparar_respostas(gabarito_texto, aluno_texto, pesos, nota_minima):
     status = "Aprovado" if nota_final >= nota_minima else "Reprovado"
     return resultados, nota_final, status
 
-# PDF
-def gerar_pdf(resultados, nota_final, status):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Relatório de Correção", ln=True, align="C")
-    pdf.ln(10)
+# Interface do Streamlit
+st.title("Corretor Automático de Provas")
 
-    for num, nota, peso, gq, aq in resultados:
-        pdf.multi_cell(0, 10, f"Questão {num} (Peso {peso}): Nota {nota}")
-        pdf.multi_cell(0, 10, f"Gabarito: {gq}")
-        pdf.multi_cell(0, 10, f"Aluno: {aq}")
-        pdf.ln(5)
+gabarito_file = st.file_uploader("Enviar Gabarito (imagem ou PDF)", type=["jpg", "jpeg", "png", "pdf"])
+aluno_file = st.file_uploader("Enviar Respostas do Aluno (imagem ou PDF)", type=["jpg", "jpeg", "png", "pdf"])
 
-    pdf.ln(10)
-    pdf.cell(200, 10, txt=f"Nota Final: {nota_final} - {status}", ln=True, align="C")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        pdf.output(tmp.name)
-        return tmp.name
+pesos_input = st.text_input("Pesos das questões separados por vírgula (ex: 1,1,2,1):", "1,1,1,1,1")
+nota_minima = st.number_input("Nota mínima para aprovação:", value=6.0, step=0.1)
 
-# STREAMLIT UI
-st.title("Corretor AI com Palavras-chave")
+if st.button("Corrigir"):
+    if gabarito_file and aluno_file:
+        extensao_gabarito = gabarito_file.name.split(".")[-1].lower()
+        extensao_aluno = aluno_file.name.split(".")[-1].lower()
 
-col1, col2 = st.columns(2)
-with col1:
-    gabarito_file = st.file_uploader("Gabarito", type=["pdf", "png", "jpg", "jpeg"])
-with col2:
-    prova_file = st.file_uploader("Prova do Aluno", type=["pdf", "png", "jpg", "jpeg"])
+        texto_gabarito = extrair_texto_imagem(gabarito_file) if extensao_gabarito in ["jpg", "jpeg", "png"] else extrair_texto_pdf(gabarito_file)
+        texto_aluno = extrair_texto_imagem(aluno_file) if extensao_aluno in ["jpg", "jpeg", "png"] else extrair_texto_pdf(aluno_file)
 
-pesos_input = st.text_input("Pesos das questões (ex: 1,1,1,1,1,1,1,1,1,1)", value="1,1,1,1,1,1,1,1,1,1")
-nota_minima = st.number_input("Nota mínima para aprovação", value=6.0)
-
-if gabarito_file and prova_file and st.button("Corrigir"):
-    with st.spinner("Analisando..."):
-        texto_gabarito = extrair_texto(gabarito_file)
-        texto_aluno = extrair_texto(prova_file)
-        pesos = [float(p) for p in pesos_input.strip().split(",")]
+        pesos = [int(p.strip()) for p in pesos_input.split(",") if p.strip().isdigit()]
 
         resultados, nota_final, status = comparar_respostas(texto_gabarito, texto_aluno, pesos, nota_minima)
 
-        st.subheader(f"Nota Final: {nota_final} - {status}")
         for num, nota, peso, gq, aq in resultados:
-            st.markdown(f"**Questão {num}** (Peso {peso}) - Nota: {nota}")
-            st.markdown(f"- **Esperado**: {gq}")
-            st.markdown(f"- **Aluno**: {aq}")
+            st.markdown(f"**Questão {num} (Peso {peso})**:")
+            st.markdown(f"- **Gabarito:** {gq}")
+            st.markdown(f"- **Resposta do Aluno:** {aq}")
+            st.markdown(f"- **Nota:** {nota:.2f}")
             st.markdown("---")
 
-        # PDF download
-        caminho_pdf = gerar_pdf(resultados, nota_final, status)
-        with open(caminho_pdf, "rb") as f:
-            st.download_button("Baixar relatório em PDF", f, file_name="relatorio.pdf")
+        st.success(f"Nota Final: {nota_final:.2f} - {status}")
+    else:
+        st.warning("Envie o gabarito e a prova do aluno.")
