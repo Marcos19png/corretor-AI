@@ -4,73 +4,65 @@ import shutil
 from pdf2image import convert_from_path
 from PIL import Image
 import os
-from fpdf import FPDF
 
-# Configurar o caminho do Tesseract
+# Configuração do Tesseract
 pytesseract.pytesseract.tesseract_cmd = shutil.which("tesseract")
 
-# Função para extrair texto de uma imagem
-def extrair_texto_imagem(imagem):
-    return pytesseract.image_to_string(imagem, lang='por')
-
-# Função para extrair texto de um PDF
-def extrair_texto_pdf(pdf_path):
-    imagens = convert_from_path(pdf_path)
-    texto_total = ""
+def extrair_texto_pdf(path):
+    imagens = convert_from_path(path)
+    texto = ""
     for imagem in imagens:
-        texto_total += pytesseract.image_to_string(imagem, lang='por')
-    return texto_total
+        texto += pytesseract.image_to_string(imagem, lang="por")
+    return texto
 
-# Classe PDF com suporte a UTF-8
-class PDF(FPDF):
-    def header(self):
-        self.set_font("Arial", size=12)
-        self.cell(0, 10, "Texto Extraído", ln=True, align="C")
+def extrair_texto_imagem(imagem):
+    return pytesseract.image_to_string(imagem, lang="por")
 
-    def add_text(self, texto):
-        self.set_font("Arial", size=12)
-        for linha in texto.split("\n"):
-            try:
-                self.cell(200, 10, txt=linha.encode('latin-1', 'replace').decode('latin-1'), ln=True)
-            except:
-                self.cell(200, 10, txt="(linha não suportada)", ln=True)
+def extrair_texto(arquivo):
+    extensao = arquivo.name.lower()
+    caminho = os.path.join("temp", arquivo.name)
+    with open(caminho, "wb") as f:
+        f.write(arquivo.getbuffer())
+    if extensao.endswith(".pdf"):
+        texto = extrair_texto_pdf(caminho)
+    else:
+        imagem = Image.open(caminho)
+        texto = extrair_texto_imagem(imagem)
+    os.remove(caminho)
+    return texto.strip()
 
-# Interface do Streamlit
-def main():
-    st.title("Corretor AI")
-
-    arquivo = st.file_uploader("Faça upload de um arquivo PDF ou imagem", type=["pdf", "png", "jpg", "jpeg"])
-
-    if arquivo is not None:
-        nome_arquivo = arquivo.name
-        os.makedirs("temp", exist_ok=True)
-        caminho_arquivo = os.path.join("temp", nome_arquivo)
-
-        with open(caminho_arquivo, "wb") as f:
-            f.write(arquivo.getbuffer())
-
-        if nome_arquivo.lower().endswith(".pdf"):
-            texto_extraido = extrair_texto_pdf(caminho_arquivo)
+def comparar_textos(gabarito, prova):
+    linhas_gabarito = gabarito.splitlines()
+    linhas_prova = prova.splitlines()
+    resultado = ""
+    for i, linha_gabarito in enumerate(linhas_gabarito):
+        if i < len(linhas_prova):
+            linha_aluno = linhas_prova[i]
+            if linha_gabarito.strip() == linha_aluno.strip():
+                resultado += f"✅ Questão {i+1}: Correta\n"
+            else:
+                resultado += f"❌ Questão {i+1}: Incorreta\nGabarito: {linha_gabarito}\nResposta: {linha_aluno}\n\n"
         else:
-            imagem = Image.open(caminho_arquivo)
-            texto_extraido = extrair_texto_imagem(imagem)
+            resultado += f"❌ Questão {i+1}: Sem resposta\nGabarito: {linha_gabarito}\n\n"
+    return resultado
 
-        st.subheader("Texto Extraído:")
-        st.text_area("", texto_extraido, height=300)
+# Interface Streamlit
+st.title("Corretor AI")
 
-        if st.button("Download do Texto em PDF"):
-            pdf = PDF()
-            pdf.add_page()
-            pdf.add_text(texto_extraido)
-            caminho_pdf = os.path.join("temp", "texto_extraido.pdf")
-            pdf.output(caminho_pdf)
-            with open(caminho_pdf, "rb") as f:
-                st.download_button("Clique para baixar", f, file_name="texto_extraido.pdf")
+st.markdown("### Envie os arquivos abaixo")
 
-        # Limpeza
-        os.remove(caminho_arquivo)
-        if os.path.exists("temp/texto_extraido.pdf"):
-            os.remove("temp/texto_extraido.pdf")
+col1, col2 = st.columns(2)
 
-if __name__ == "__main__":
-    main()
+with col1:
+    gabarito_file = st.file_uploader("Gabarito", type=["pdf", "png", "jpg", "jpeg"])
+with col2:
+    prova_file = st.file_uploader("Prova do Aluno", type=["pdf", "png", "jpg", "jpeg"])
+
+if gabarito_file and prova_file:
+    os.makedirs("temp", exist_ok=True)
+    texto_gabarito = extrair_texto(gabarito_file)
+    texto_prova = extrair_texto(prova_file)
+
+    st.subheader("Resultado da Correção")
+    resultado = comparar_textos(texto_gabarito, texto_prova)
+    st.text(resultado)
