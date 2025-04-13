@@ -1,153 +1,111 @@
-import streamlit as st
-import requests
-import base64
 import os
 import re
-import io
-import tempfile
-import pdfplumber
-import pandas as pd
-import matplotlib.pyplot as plt
-from fpdf import FPDF
+import streamlit as st
+import fitz  # PyMuPDF
+import base64
 from PIL import Image
+import matplotlib.pyplot as plt
+import pandas as pd
+from io import BytesIO
+from fpdf import FPDF
 from datetime import datetime
+import easyocr
 
-# ========================== CONFIGURAÇÃO ==========================
-st.set_page_config(page_title="Corretor de Provas com Mathpix", layout="wide")
-MATHPIX_APP_ID = "mathmindia_ea58bf"
-MATHPIX_APP_KEY = "3330e99e78933441b0f66a816112d73c717ad7109cd93293a4ac9008572e987c"
+# ========== CONFIGURAÇÃO ==========
+reader = easyocr.Reader(['pt', 'en'])  # Inicializa o OCR
 
-# ========================== FUNÇÕES AUXILIARES ==========================
-def extrair_texto_pdf(file):
-    with pdfplumber.open(file) as pdf:
-        texto = ""
-        for page in pdf.pages:
-            texto += page.extract_text() + "\n"
-    return texto
+st.set_page_config(page_title="Corretor de Provas com IA", layout="wide")
+st.title("🧠 Corretor de Provas com Mathpix (via EasyOCR)")
+st.subheader("Corrija provas automaticamente com base em um gabarito e imagens dos alunos.")
 
-def extrair_gabarito(texto):
-    gabarito = {}
-    questoes = re.findall(r'(Q\d+)\s*(.*?)(?=Q\d+|$)', texto, re.DOTALL)
-    for q, conteudo in questoes:
-        etapas = re.findall(r'(.*?)=\s*([\d.]+)', conteudo.strip())
-        gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
-    return gabarito
+# ========== FUNÇÕES ==========
 
-def mathpix_ocr(image_bytes):
-    headers = {
-        "app_id": MATHPIX_APP_ID,
-        "app_key": MATHPIX_APP_KEY,
-        "Content-type": "application/json"
-    }
-    data = {
-        "src": f"data:image/jpeg;base64,{image_bytes}",
-        "formats": ["latex_styled"]
-    }
-    response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
-    return response.json().get("latex_styled", "")
+def extract_text_from_pdf(pdf_file):
+    text = ""
+    with fitz.open(stream=pdf_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            text += page.get_text()
+    return text
 
-def processar_imagens(imagens, gabarito):
+def extract_weights_from_gabarito(file):
+    if file.name.endswith(".pdf"):
+        raw_text = extract_text_from_pdf(file)
+    else:
+        image = Image.open(file)
+        raw_text = "\n".join([line[1] for line in reader.readtext(image)])
+
+    pesos = {}
+    for match in re.finditer(r"(Q\d+)[^\n]*?= (\d+(\.\d+)?)", raw_text):
+        questao = match.group(1)
+        peso = float(match.group(2))
+        pesos.setdefault(questao, []).append(peso)
+    return raw_text, pesos
+
+def process_images(images, gabarito_text, pesos):
     resultados = []
-    textos_ocr = {}
-    for img in imagens:
-        nome_aluno = img.name.split(".")[0]
-        image = Image.open(img)
-        buffer = io.BytesIO()
-        image.save(buffer, format="JPEG")
-        b64 = base64.b64encode(buffer.getvalue()).decode()
-        texto = mathpix_ocr(b64)
-        textos_ocr[nome_aluno] = texto
+    for img in images:
+        texto_ocr = "\n".join([line[1] for line in reader.readtext(img)])
+        nota = 0
+        for questao, valores in pesos.items():
+            if questao in texto_ocr:
+                nota += sum(valores)
+        resultados.append({"Aluno": img.name, "Nota": round(nota, 2)})
+    return resultados
 
-        resultado = {"Aluno": nome_aluno}
-        nota_total = 0
-        for q, etapas in gabarito.items():
-            nota_q = 0
-            for etapa, peso in etapas:
-                if etapa in texto:
-                    nota_q += peso
-            resultado[q] = round(nota_q, 2)
-            nota_total += nota_q
-        resultado["Nota Total"] = round(nota_total, 2)
-        resultado["Status"] = "Aprovado" if nota_total >= 6 else "Reprovado"
-        resultados.append(resultado)
-    return resultados, textos_ocr
-
-def gerar_pdf(resultado, turma, professor, data_prova):
+def gerar_pdf(resultados, nome_turma, nome_professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, f"Relatório - {resultado['Aluno']}", ln=True, align='C')
-    pdf.cell(200, 10, f"Turma: {turma} | Professor: {professor} | Data: {data_prova}", ln=True)
+    pdf.cell(200, 10, txt=f"Relatório - {nome_turma}", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Professor: {nome_professor} - Data: {data_prova}", ln=True, align='C')
     pdf.ln(10)
-    for chave, valor in resultado.items():
-        pdf.cell(200, 10, f"{chave}: {valor}", ln=True)
-    pdf_output = io.BytesIO()
-    pdf.output(pdf_output)
-    return pdf_output.getvalue()
-
-def gerar_excel(resultados):
-    df = pd.DataFrame(resultados)
-    buffer = io.BytesIO()
-    df.to_excel(buffer, index=False)
+    for r in resultados:
+        pdf.cell(200, 10, txt=f"{r['Aluno']}: {r['Nota']} pontos", ln=True)
+    buffer = BytesIO()
+    pdf.output(buffer)
     return buffer.getvalue()
 
-def exibir_grafico(resultados):
-    df = pd.DataFrame(resultados)
-    fig, ax = plt.subplots()
-    ax.bar(df["Aluno"], df["Nota Total"], color='skyblue')
-    ax.set_ylabel("Nota")
-    ax.set_title("Desempenho da Turma")
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
-
-# ========================== INTERFACE ==========================
-st.title("🧠 Corretor de Provas com IA (Mathpix)")
+# ========== INTERFACE ==========
 
 with st.sidebar:
     st.header("Informações da Prova")
-    professor = st.text_input("Professor")
-    turma = st.text_input("Turma")
+    nome_professor = st.text_input("Nome do Professor")
+    nome_turma = st.text_input("Nome da Turma")
     data_prova = st.date_input("Data da Prova", datetime.today())
-    gabarito_file = st.file_uploader("Gabarito (PDF ou imagem)", type=["pdf", "jpg", "jpeg", "png"])
+    gabarito_file = st.file_uploader("Envie o Gabarito (PDF ou imagem)", type=["pdf", "jpg", "jpeg", "png"])
 
-st.subheader("Upload das Provas dos Alunos")
-imagens_provas = st.file_uploader("Selecione as imagens das provas", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+st.markdown("---")
+st.header("Upload das Provas dos Alunos")
+uploaded_files = st.file_uploader("Selecione as imagens das provas (JPG ou PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-if st.button("Iniciar Correção"):
-    if not gabarito_file or not imagens_provas:
-        st.warning("Envie o gabarito e as provas dos alunos.")
+# ========== AÇÃO ==========
+if st.button("Corrigir Provas"):
+    if not gabarito_file or not uploaded_files:
+        st.warning("Por favor, envie o gabarito e as provas dos alunos.")
     else:
-        st.info("Extraindo gabarito...")
-        if gabarito_file.name.endswith(".pdf"):
-            texto_gabarito = extrair_texto_pdf(gabarito_file)
-        else:
-            imagem = Image.open(gabarito_file)
-            buffer = io.BytesIO()
-            imagem.save(buffer, format="JPEG")
-            b64 = base64.b64encode(buffer.getvalue()).decode()
-            texto_gabarito = mathpix_ocr(b64)
+        with st.spinner("Processando o gabarito..."):
+            gabarito_text, pesos = extract_weights_from_gabarito(gabarito_file)
 
-        gabarito = extrair_gabarito(texto_gabarito)
-        st.success("Gabarito processado!")
+        st.text("Pesos identificados no gabarito:")
+        st.json(pesos)
 
-        st.info("Corrigindo provas...")
-        resultados, textos = processar_imagens(imagens_provas, gabarito)
+        with st.spinner("Corrigindo provas dos alunos..."):
+            resultados = process_images(uploaded_files, gabarito_text, pesos)
+
+        df = pd.DataFrame(resultados)
         st.success("Correção concluída!")
+        st.dataframe(df)
 
-        st.subheader("Resultados")
-        df_resultado = pd.DataFrame(resultados)
-        st.dataframe(df_resultado)
+        st.subheader("Gráfico de Desempenho")
+        fig, ax = plt.subplots()
+        ax.bar(df['Aluno'], df['Nota'], color='skyblue')
+        plt.xticks(rotation=90)
+        st.pyplot(fig)
 
-        exibir_grafico(resultados)
+        st.subheader("Baixar Relatórios")
+        pdf_data = gerar_pdf(resultados, nome_turma, nome_professor, data_prova)
+        st.download_button("Baixar PDF", data=pdf_data, file_name="relatorio.pdf", mime="application/pdf")
 
-        excel_bytes = gerar_excel(resultados)
-        st.download_button("Baixar Planilha Excel", data=excel_bytes, file_name="notas.xlsx")
-
-        for r in resultados:
-            pdf_bytes = gerar_pdf(r, turma, professor, data_prova)
-            st.download_button(f"Baixar PDF {r['Aluno']}", data=pdf_bytes, file_name=f"{r['Aluno']}.pdf")
-
-        with st.expander("Ver LaTeX extraído"):
-            for aluno, texto in textos.items():
-                st.markdown(f"**{aluno}**")
-                st.code(texto, language="latex")
+        excel_output = BytesIO()
+        df.to_excel(excel_output, index=False)
+        st.download_button("Baixar Excel", data=excel_output.getvalue(), file_name="relatorio_notas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
