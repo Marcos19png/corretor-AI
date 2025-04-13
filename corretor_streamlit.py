@@ -76,7 +76,7 @@ def processar_provas(agrupadas, gabarito, nota_minima):
     return resultados, textos_ocr
 
 # Geração de PDF individual com gráfico
-def gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova):
+def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -87,29 +87,10 @@ def gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova):
     pdf.ln(10)
     for chave, valor in resultado.items():
         pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
-
-    # Gerar gráfico de barras das notas por questão
-    questoes = [k for k in resultado.keys() if k.startswith('Q')]
-    notas = [resultado[q] for q in questoes]
-    fig, ax = plt.subplots()
-    ax.bar(questoes, notas, color='skyblue')
-    ax.set_xlabel('Questões')
-    ax.set_ylabel('Nota')
-    ax.set_title('Desempenho por Questão')
-
-    # Salvar gráfico em buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format='PNG')
-    plt.close(fig)
-    buf.seek(0)
-
-    # Inserir gráfico no PDF
-    pdf.image(buf, x=10, y=pdf.get_y(), w=pdf.w - 20)
-    buf.close()
-
     conteudo_pdf = pdf.output(dest="S").encode("latin1")
     return io.BytesIO(conteudo_pdf)
 
+# Geração de planilha Excel
 def gerar_excel_em_memoria(resultados):
     df = pd.DataFrame(resultados)
     excel_buffer = io.BytesIO()
@@ -118,6 +99,7 @@ def gerar_excel_em_memoria(resultados):
     excel_buffer.seek(0)
     return excel_buffer
 
+# Exibir gráfico geral de desempenho
 def exibir_grafico(resultados):
     nomes = [r['Aluno'] for r in resultados]
     notas = [r['Nota Total'] for r in resultados]
@@ -127,7 +109,7 @@ def exibir_grafico(resultados):
     ax.set_title('Desempenho dos Alunos')
     st.pyplot(fig)
 
-# Interface
+# Interface Streamlit
 st.title("Corretor de Provas com IA (OCR + PDF)")
 
 turma = st.text_input("Turma:")
@@ -147,7 +129,22 @@ if st.button("Corrigir Provas"):
 
         st.success("Correção concluída!")
 
+        # Geração de planilha Excel
         excel_memoria = gerar_excel_em_memoria(resultados)
         st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
 
-        exibir_g 
+        # Exibir gráfico geral
+        exibir_grafico(resultados)
+
+        # Exibir texto OCR extraído
+        with st.expander("Mostrar texto OCR extraído dos alunos"):
+            for aluno, texto in textos_ocr.items():
+                st.text_area(f"{aluno}", texto, height=200)
+
+        # Geração de relatórios PDF individuais
+        st.subheader("Relatórios Individuais")
+        for resultado in resultados:
+            pdf_buffer = gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova)
+            st.download_button(f"Baixar Relatório de {resultado['Aluno']}", pdf_buffer, file_name=f"{resultado['Aluno']}_relatorio.pdf")
+    else:
+        st.warning("Env 
