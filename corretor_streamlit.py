@@ -80,6 +80,7 @@ def processar_provas(arquivos_imagem, gabarito):
     return resultados, textos_ocr
 
 # Gerar PDF geral
+# Gerar PDF geral
 def gerar_pdf_geral(resultados, professor, turma, data_prova):
     pdf = FPDF()
     pdf.add_page()
@@ -90,9 +91,8 @@ def gerar_pdf_geral(resultados, professor, turma, data_prova):
     for r in resultados:
         linha = f"{r['Aluno']}: Nota = {r['Nota Total']} - {r['Status']}"
         pdf.cell(200, 10, txt=linha, ln=True)
-    output = BytesIO()
     pdf_bytes = pdf.output(dest='S').encode('latin1')
-return pdf_bytes
+    return pdf_bytes
 
 # Gráfico de desempenho
 def plotar_grafico(resultados):
