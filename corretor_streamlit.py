@@ -12,13 +12,14 @@ import unicodedata
 import io
 import zipfile
 
-# Detectar o caminho do Tesseract
+# Detectar o caminho do Tesseract (compatível com Streamlit Cloud)
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
-    st.warning("Tesseract não encontrado. Se estiver rodando localmente, instale o Tesseract OCR.")
+    st.warning("Tesseract não encontrado.")
 
+# Funções
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -81,9 +82,9 @@ def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     for chave, valor in resultado.items():
         pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
 
-    buffer = io.BytesIO()
-    pdf.output(buffer)
-    buffer.seek(0)
+    # Corrigido: salvar conteúdo do PDF na memória
+    conteudo_pdf = pdf.output(dest="S").encode("latin1")
+    buffer = io.BytesIO(conteudo_pdf)
     return buffer
 
 def gerar_pdf_zip(resultados, turma, professor, data_prova):
