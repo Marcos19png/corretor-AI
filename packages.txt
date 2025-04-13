@@ -2,3 +2,4 @@ tesseract-ocr
 tesseract-ocr-por
 poppler-utils
 libgl1
+libglib2.0-0
