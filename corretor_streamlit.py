@@ -31,7 +31,7 @@ def carregar_trocr():
 
 processor, model = carregar_trocr()
 
-# Funções utilitárias
+# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -59,7 +59,7 @@ def agrupar_imagens_por_aluno(imagens):
         nome = imagem.name.split(".")[0]
         aluno = re.sub(r'_pag\d+', '', nome)
         agrupadas.setdefault(aluno, []).append(imagem)
-    return agrupadas
+    return agrupadas if agrupadas else ([], {})
 
 def ocr_tesseract(imagem):
     return pytesseract.image_to_string(Image.open(imagem))
@@ -72,6 +72,8 @@ def ocr_trocr(imagem):
     return generated_text
 
 def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
+    if not agrupadas:
+        return [], {}
     resultados = []
     textos_ocr = {}
     for aluno, imagens in agrupadas.items():
@@ -149,41 +151,46 @@ def exibir_grafico(resultados):
     ax.set_title('Desempenho dos Alunos')
     st.pyplot(fig)
 
-# Interface
+# ========== INTERFACE ==========
 st.title("Corretor de Provas com IA (OCR + PDF)")
+st.write("Preencha os dados e envie o gabarito + provas escaneadas.")
 
-turma = st.text_input("Turma:")
-professor = st.text_input("Professor:")
-data_prova = st.date_input("Data da prova:")
-nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0)
-metodo_ocr = st.selectbox("Escolha o método OCR:", ["Tesseract", "TrOCR"])
+col1, col2, col3 = st.columns(3)
+with col1:
+    professor = st.text_input("Nome do Professor")
+with col2:
+    turma = st.text_input("Turma")
+with col3:
+    data_prova = st.date_input("Data da Prova")
 
-gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
-imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
+metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR"])
+
+gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
+imagens_provas = st.file_uploader("Envie as imagens das provas (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
 if st.button("Corrigir Provas"):
-    if gabarito_pdf and imagens_provas:
-        with st.spinner("Corrigindo provas..."):
+    if not gabarito_pdf or not imagens_provas:
+        st.warning("Por favor, envie o gabarito e as imagens das provas.")
+    else:
+        with st.spinner("Processando..."):
             gabarito = extrair_gabarito(gabarito_pdf)
             agrupadas = agrupar_imagens_por_aluno(imagens_provas)
-            resultados, textos_ocr = processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr)
+            resultados, textos = processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr)
 
-        st.success("Correção concluída!")
-        excel_memoria = gerar_excel_em_memoria(resultados)
-        st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
-        exibir_grafico(resultados)
+            if resultados:
+                st.success("Correção concluída!")
 
-        for resultado in resultados:
-            pdf_buffer = gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova)
-            st.download_button(
-                label=f"Baixar PDF {resultado['Aluno']}",
-                data=pdf_buffer,
-                file_name=f"{resultado['Aluno']}_relatorio.pdf",
-                mime="application/pdf"
-            )
+                # Exibir gráfico geral
+                exibir_grafico(resultados)
 
-        with st.expander("Mostrar texto OCR extraído dos alunos"):
-            for aluno, texto in textos_ocr.items():
-                st.text_area(f"{aluno}", texto, height=200)
-    else:
-        st.warning("Envie o gabarito e as imagens das provas antes de corrigir.")
+                # Download da planilha Excel
+                excel_data = gerar_excel_em_memoria(resultados)
+                st.download_button("Baixar Resultado em Excel", excel_data, file_name="resultado_provas.xlsx")
+
+                # PDFs individuais
+                for resultado in resultados:
+                    pdf_file = gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova)
+                    st.download_button(f"Baixar PDF de {resultado['Aluno']}", pdf_file, file_name=f"{resultado['Aluno']}.pdf")
+            else:
+                st.warning("Nenhuma prova foi processada.")
