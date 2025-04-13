@@ -6,19 +6,29 @@ import os
 import re
 import pandas as pd
 from fpdf import FPDF
-import unicodedata
-import difflib
 import matplotlib.pyplot as plt
-import seaborn as sns
+import difflib
+import unicodedata
 
-# Função para normalizar texto (remover acentos, converter para minúsculas)
-def normalizar_texto(texto):
+# Criar diretórios se não existirem
+os.makedirs("relatorios/pdf", exist_ok=True)
+os.makedirs("relatorios/excel", exist_ok=True)
+os.makedirs("uploads", exist_ok=True)
+
+# Função para remover acentos e normalizar texto
+def normalizar(texto):
     texto = texto.lower()
-    texto = unicodedata.normalize('NFD', texto)
-    texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
     return texto
 
-# Função para extrair etapas e pesos do gabarito
+# Comparação com tolerância de similaridade
+def etapa_correspondente(etapa_gabarito, texto_aluno):
+    etapa_norm = normalizar(etapa_gabarito)
+    texto_norm = normalizar(texto_aluno)
+    return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.85)
+
+# Extrair etapas e pesos do gabarito
 def extrair_gabarito(pdf_path):
     gabarito = {}
     with pdfplumber.open(pdf_path) as pdf:
@@ -27,24 +37,22 @@ def extrair_gabarito(pdf_path):
             questoes = re.findall(r'(Q\d+):\s*(.*?)\n(?=Q\d+:|$)', texto, re.DOTALL)
             for q, conteudo in questoes:
                 etapas = re.findall(r'(.+?)\s*=\s*([\d.]+)', conteudo)
-                gabarito[q] = [(normalizar_texto(etapa.strip()), float(peso)) for etapa, peso in etapas]
+                gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-# Função para processar as imagens das provas dos alunos
+# Processar imagens das provas
 def processar_provas(imagens, gabarito):
     resultados = []
     for imagem in imagens:
         nome_aluno = os.path.splitext(os.path.basename(imagem.name))[0]
         imagem_pil = Image.open(imagem)
         texto = pytesseract.image_to_string(imagem_pil)
-        texto_normalizado = normalizar_texto(texto)
         resultado_aluno = {'Aluno': nome_aluno}
         nota_total = 0
         for q, etapas in gabarito.items():
             nota_q = 0
             for etapa, peso in etapas:
-                correspondencias = difflib.get_close_matches(etapa, texto_normalizado.split(), n=1, cutoff=0.8)
-                if correspondencias:
+                if etapa_correspondente(etapa, texto):
                     nota_q += peso
             resultado_aluno[q] = nota_q
             nota_total += nota_q
@@ -53,7 +61,7 @@ def processar_provas(imagens, gabarito):
         resultados.append(resultado_aluno)
     return resultados
 
-# Função para gerar relatório PDF
+# Gerar PDF com resultados
 def gerar_pdf(resultados, pagina):
     pdf = FPDF()
     pdf.add_page()
@@ -67,39 +75,67 @@ def gerar_pdf(resultados, pagina):
                 pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
         pdf.cell(200, 10, txt=f"Nota Total: {resultado['Nota Total']}", ln=True)
         pdf.cell(200, 10, txt=f"Status: {resultado['Status']}", ln=True)
-    pdf.output("relatorio_resultados.pdf")
+    pdf.output(f"relatorios/pdf/relatorio_resultados_pagina_{pagina}.pdf")
 
-# Função para gerar planilha Excel
+# Gerar planilha Excel
 def gerar_excel(resultados):
     df = pd.DataFrame(resultados)
-    df.to_excel("relatorio_resultados.xlsx", index=False)
+    df.to_excel("relatorios/excel/relatorio_resultados.xlsx", index=False)
 
-# Função para exibir gráfico de desempenho
+# Salvar histórico geral
+def salvar_historico(resultados):
+    df_novo = pd.DataFrame(resultados)
+    caminho_historico = "historico.csv"
+    if os.path.exists(caminho_historico):
+        df_existente = pd.read_csv(caminho_historico)
+        df_total = pd.concat([df_existente, df_novo], ignore_index=True)
+    else:
+        df_total = df_novo
+    df_total.to_csv(caminho_historico, index=False)
+
+# Gráfico de desempenho
 def exibir_grafico(resultados):
-    df = pd.DataFrame(resultados)
-    plt.figure(figsize=(10, 6))
-    sns.barplot(x='Aluno', y='Nota Total', data=df, palette='viridis')
-    plt.xticks(rotation=45)
-    plt.title('Desempenho dos Alunos')
-    plt.xlabel('Aluno')
-    plt.ylabel('Nota Total')
-    st.pyplot(plt)
+    nomes = [r['Aluno'] for r in resultados]
+    notas = [r['Nota Total'] for r in resultados]
+    fig, ax = plt.subplots()
+    ax.barh(nomes, notas, color='skyblue')
+    ax.set_xlabel('Nota Total')
+    ax.set_title('Desempenho dos Alunos')
+    st.pyplot(fig)
 
-# Interface do Streamlit
+# Interface
 st.title("Corretor de Provas com IA")
 
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
 imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
 if gabarito_pdf and imagens_provas:
+    # Salvar os arquivos
+    gabarito_path = f"uploads/gabarito_{gabarito_pdf.name}"
+    with open(gabarito_path, "wb") as f:
+        f.write(gabarito_pdf.read())
+
+    prova_paths = []
+    for imagem in imagens_provas:
+        path = f"uploads/prova_{imagem.name}"
+        with open(path, "wb") as f:
+            f.write(imagem.read())
+        prova_paths.append(path)
+
+    gabarito_pdf.seek(0)
     gabarito = extrair_gabarito(gabarito_pdf)
     resultados = processar_provas(imagens_provas, gabarito)
+
     gerar_pdf(resultados, pagina=1)
     gerar_excel(resultados)
+    salvar_historico(resultados)
+
     st.success("Correção concluída!")
-    with open("relatorio_resultados.pdf", "rb") as pdf_file:
+
+    with open("relatorios/pdf/relatorio_resultados_pagina_1.pdf", "rb") as pdf_file:
         st.download_button("Baixar Relatório PDF", pdf_file, file_name="relatorio_resultados.pdf")
-    with open("relatorio_resultados.xlsx", "rb") as excel_file:
+
+    with open("relatorios/excel/relatorio_resultados.xlsx", "rb") as excel_file:
         st.download_button("Baixar Planilha Excel", excel_file, file_name="relatorio_resultados.xlsx")
-    st.subheader("Gráfico de Desempenho")
+
     exibir_grafico(resultados)
