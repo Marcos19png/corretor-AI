@@ -10,16 +10,15 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 import io
-import tempfile
 
-# Configurar Tesseract
+# Configurar Tesseract (compatível com Streamlit Cloud)
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-# Funções auxiliares
+# Normalização e comparação tolerante
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -30,6 +29,7 @@ def etapa_correspondente(etapa_gabarito, texto_aluno):
     texto_norm = normalizar(texto_aluno)
     return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.8)
 
+# Gabarito a partir do PDF
 def extrair_gabarito(file):
     gabarito = {}
     with pdfplumber.open(file) as pdf:
@@ -41,6 +41,7 @@ def extrair_gabarito(file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
+# Agrupar imagens por aluno
 def agrupar_imagens_por_aluno(imagens):
     agrupadas = {}
     for imagem in imagens:
@@ -49,6 +50,7 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas
 
+# Processar imagens e calcular nota
 def processar_provas(agrupadas, gabarito, nota_minima):
     resultados = []
     textos_ocr = {}
@@ -73,20 +75,8 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultados.append(resultado)
     return resultados, textos_ocr
 
-def gerar_grafico(aluno, nota_total):
-    fig, ax = plt.subplots(figsize=(4, 2))
-    ax.barh([aluno], [nota_total], color='skyblue')
-    ax.set_xlim(0, 10)
-    ax.set_xlabel('Nota Total')
-    ax.set_title('Desempenho')
-    buf = io.BytesIO()
-    plt.tight_layout()
-    plt.savefig(buf, format='png')
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-def gerar_pdf_individual(resultado, turma, professor, data_prova):
+# Geração de PDF individual com gráfico
+def gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -96,16 +86,29 @@ def gerar_pdf_individual(resultado, turma, professor, data_prova):
     pdf.cell(200, 10, txt=f"Professor: {professor}", ln=True)
     pdf.ln(10)
     for chave, valor in resultado.items():
-        if chave not in ['Aluno']:
-            pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+        pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
 
-    # Adicionar gráfico
-    grafico = gerar_grafico(resultado['Aluno'], resultado['Nota Total'])
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        tmpfile.write(grafico.read())
-        tmpfile.flush()
-        pdf.image(tmpfile.name, x=10, y=pdf.get_y(), w=pdf.w - 20)
-    return pdf.output(dest='S').encode('latin1')
+    # Gerar gráfico de barras das notas por questão
+    questoes = [k for k in resultado.keys() if k.startswith('Q')]
+    notas = [resultado[q] for q in questoes]
+    fig, ax = plt.subplots()
+    ax.bar(questoes, notas, color='skyblue')
+    ax.set_xlabel('Questões')
+    ax.set_ylabel('Nota')
+    ax.set_title('Desempenho por Questão')
+
+    # Salvar gráfico em buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format='PNG')
+    plt.close(fig)
+    buf.seek(0)
+
+    # Inserir gráfico no PDF
+    pdf.image(buf, x=10, y=pdf.get_y(), w=pdf.w - 20)
+    buf.close()
+
+    conteudo_pdf = pdf.output(dest="S").encode("latin1")
+    return io.BytesIO(conteudo_pdf)
 
 def gerar_excel_em_memoria(resultados):
     df = pd.DataFrame(resultados)
@@ -115,8 +118,17 @@ def gerar_excel_em_memoria(resultados):
     excel_buffer.seek(0)
     return excel_buffer
 
+def exibir_grafico(resultados):
+    nomes = [r['Aluno'] for r in resultados]
+    notas = [r['Nota Total'] for r in resultados]
+    fig, ax = plt.subplots()
+    ax.barh(nomes, notas, color='skyblue')
+    ax.set_xlabel('Nota Total')
+    ax.set_title('Desempenho dos Alunos')
+    st.pyplot(fig)
+
 # Interface
-st.title("Corretor de Provas com IA (OCR + PDF) - Matemática")
+st.title("Corretor de Provas com IA (OCR + PDF)")
 
 turma = st.text_input("Turma:")
 professor = st.text_input("Professor:")
@@ -138,17 +150,4 @@ if st.button("Corrigir Provas"):
         excel_memoria = gerar_excel_em_memoria(resultados)
         st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
 
-        for resultado in resultados:
-            pdf_bytes = gerar_pdf_individual(resultado, turma, professor, data_prova)
-            st.download_button(
-                label=f"Baixar PDF - {resultado['Aluno']}",
-                data=pdf_bytes,
-                file_name=f"{resultado['Aluno']}_relatorio.pdf",
-                mime='application/pdf'
-            )
-
-        with st.expander("Mostrar texto OCR extraído dos alunos"):
-            for aluno, texto in textos_ocr.items():
-                st.text_area(f"{aluno}", texto, height=200)
-    else:
-        
+        exibir_g 
