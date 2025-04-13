@@ -12,6 +12,8 @@ import unicodedata
 import io
 import tempfile
 import os
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+import torch
 
 # Configurar Tesseract
 tesseract_path = shutil.which("tesseract")
@@ -20,7 +22,16 @@ if tesseract_path:
 else:
     st.warning("Tesseract não encontrado.")
 
-# Funções
+# Carregar modelo TrOCR
+@st.cache_resource
+def carregar_trocr():
+    processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
+    model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
+    return processor, model
+
+processor, model = carregar_trocr()
+
+# Funções utilitárias
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -50,13 +61,26 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas
 
-def processar_provas(agrupadas, gabarito, nota_minima):
+def ocr_tesseract(imagem):
+    return pytesseract.image_to_string(Image.open(imagem))
+
+def ocr_trocr(imagem):
+    image = Image.open(imagem).convert("RGB")
+    pixel_values = processor(images=image, return_tensors="pt").pixel_values
+    generated_ids = model.generate(pixel_values)
+    generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+    return generated_text
+
+def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
     resultados = []
     textos_ocr = {}
     for aluno, imagens in agrupadas.items():
         texto_completo = ''
         for img in imagens:
-            texto = pytesseract.image_to_string(Image.open(img))
+            if metodo_ocr == "Tesseract":
+                texto = ocr_tesseract(img)
+            else:
+                texto = ocr_trocr(img)
             texto_completo += '\n' + texto
         textos_ocr[aluno] = texto_completo
 
@@ -132,22 +156,21 @@ turma = st.text_input("Turma:")
 professor = st.text_input("Professor:")
 data_prova = st.date_input("Data da prova:")
 nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0)
+metodo_ocr = st.selectbox("Escolha o método OCR:", ["Tesseract", "TrOCR"])
 
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
 imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-def corrigir_provas():
+if st.button("Corrigir Provas"):
     if gabarito_pdf and imagens_provas:
         with st.spinner("Corrigindo provas..."):
             gabarito = extrair_gabarito(gabarito_pdf)
             agrupadas = agrupar_imagens_por_aluno(imagens_provas)
-            resultados, textos_ocr = processar_provas(agrupadas, gabarito, nota_minima)
+            resultados, textos_ocr = processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr)
 
         st.success("Correção concluída!")
-
         excel_memoria = gerar_excel_em_memoria(resultados)
         st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
-
         exibir_grafico(resultados)
 
         for resultado in resultados:
@@ -164,5 +187,3 @@ def corrigir_provas():
                 st.text_area(f"{aluno}", texto, height=200)
     else:
         st.warning("Envie o gabarito e as imagens das provas antes de corrigir.")
-
-st.button("Corrigir Provas", on_click=corrigir_provas)
