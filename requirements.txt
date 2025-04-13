@@ -1,9 +1,10 @@
 streamlit
 pytesseract
 pillow
-pymupdf
-fpdf
 pdfplumber
+fpdf
 pandas
 openpyxl
-tqdm
+unicodedata2
+matplotlib
+seaborn
