@@ -12,18 +12,17 @@ import unicodedata
 import io
 import tempfile
 import os
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 from pix2tex.cli import LatexOCR
 
-# Configurar Tesseract
+# ========== CONFIGURAÇÃO ==========
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-# Carregar modelos OCR
 @st.cache_resource
 def carregar_trocr():
     processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
@@ -35,9 +34,9 @@ def carregar_latex_ocr():
     return LatexOCR()
 
 processor, model = carregar_trocr()
-latex_ocr_model = carregar_latex_ocr()
+latex_ocr = carregar_latex_ocr()
 
-# Funções
+# ========== FUNÇÕES ==========
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -79,7 +78,7 @@ def ocr_trocr(imagem):
 
 def ocr_latex(imagem):
     image = Image.open(imagem).convert("RGB")
-    return latex_ocr_model(image)
+    return latex_ocr(image)
 
 def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
     if not agrupadas:
@@ -93,8 +92,10 @@ def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
                 texto = ocr_tesseract(img)
             elif metodo_ocr == "TrOCR":
                 texto = ocr_trocr(img)
-            else:
+            elif metodo_ocr == "LaTeX-OCR":
                 texto = ocr_latex(img)
+            else:
+                texto = ""
             texto_completo += '\n' + texto
         textos_ocr[aluno] = texto_completo
 
@@ -164,8 +165,7 @@ def exibir_grafico(resultados):
     st.pyplot(fig)
 
 # ========== INTERFACE ==========
-st.title("Corretor de Provas com IA (OCR + PDF)")
-st.write("Preencha os dados e envie o gabarito + provas escaneadas.")
+st.title("Corretor de Provas com IA (Tesseract / TrOCR / LaTeX-OCR)")
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -179,25 +179,29 @@ nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
 metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR", "LaTeX-OCR"])
 
 gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
-imagens_provas = st.file_uploader("Envie as imagens das provas (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+imagens_provas = st.file_uploader("Envie as provas dos alunos (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
 if st.button("Corrigir Provas"):
     if not gabarito_pdf or not imagens_provas:
         st.warning("Por favor, envie o gabarito e as imagens das provas.")
     else:
-        with st.spinner("Processando..."):
+        with st.spinner("Corrigindo..."):
             gabarito = extrair_gabarito(gabarito_pdf)
             agrupadas = agrupar_imagens_por_aluno(imagens_provas)
             resultados, textos = processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr)
 
-            if resultados:
-                st.success("Correção concluída!")
-                exibir_grafico(resultados)
-                excel_data = gerar_excel_em_memoria(resultados)
-                st.download_button("Baixar Resultado em Excel", excel_data, file_name="resultado_provas.xlsx")
+        if resultados:
+            st.success("Correção concluída!")
+            exibir_grafico(resultados)
+            excel = gerar_excel_em_memoria(resultados)
+            st.download_button("Baixar Excel", excel, file_name="resultado_provas.xlsx")
 
-                for resultado in resultados:
-                    pdf_file = gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova)
-                    st.download_button(f"Baixar PDF de {resultado['Aluno']}", pdf_file, file_name=f"{resultado['Aluno']}.pdf")
-            else:
-                st.warning("Nenhuma prova foi processada.")
+            for resultado in resultados:
+                pdf_file = gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova)
+                st.download_button(f"Baixar PDF de {resultado['Aluno']}", pdf_file, file_name=f"{resultado['Aluno']}.pdf")
+
+            with st.expander("Visualizar OCR extraído"):
+                for aluno, texto in textos.items():
+                    st.text_area(f"{aluno}", texto, height=200)
+        else:
+            st.warning("Nenhuma prova foi processada.")
