@@ -13,11 +13,15 @@ import unicodedata
 # Caminho do executável do Tesseract OCR (ajuste se necessário)
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-# Criar diretórios principais
-os.makedirs("relatorios/pdf", exist_ok=True)
-os.makedirs("relatorios/excel", exist_ok=True)
-os.makedirs("relatorios/individuais", exist_ok=True)
-os.makedirs("uploads", exist_ok=True)
+# Criar diretórios principais com segurança
+for pasta in [
+    "relatorios",
+    "relatorios/pdf",
+    "relatorios/excel",
+    "relatorios/individuais",
+    "uploads"
+]:
+    os.makedirs(pasta, exist_ok=True)
 
 # Funções auxiliares
 def normalizar(texto):
