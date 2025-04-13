@@ -12,29 +12,20 @@ import unicodedata
 import io
 import tempfile
 import os
-import torch
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
-try:
-    from pix2tex.cli import LatexOCR
-    LATEX_AVAILABLE = True
-except ImportError:
-    LATEX_AVAILABLE = False
+from pix2tex.cli import LatexOCR
 
-# ========== MODELOS ==========
-@st.cache_resource
-def carregar_trocr():
-    processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
-    model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
-    return processor, model
+# ========== CONFIGURAÇÃO ==========
+tesseract_path = shutil.which("tesseract")
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+else:
+    st.warning("Tesseract não encontrado.")
 
 @st.cache_resource
 def carregar_latex_ocr():
-    if LATEX_AVAILABLE:
-        return LatexOCR()
-    return None
+    return LatexOCR()
 
-processor, model = carregar_trocr()
 latex_ocr = carregar_latex_ocr()
 
 # ========== FUNÇÕES ==========
@@ -67,23 +58,11 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas if agrupadas else ([], {})
 
-def ocr_tesseract(imagem):
-    return pytesseract.image_to_string(Image.open(imagem))
-
-def ocr_trocr(imagem):
-    image = Image.open(imagem).convert("RGB")
-    pixel_values = processor(images=image, return_tensors="pt").pixel_values
-    generated_ids = model.generate(pixel_values)
-    generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
-    return generated_text
-
 def ocr_latex(imagem):
-    if not latex_ocr:
-        return "LaTeX OCR não disponível nesta instância."
     image = Image.open(imagem).convert("RGB")
     return latex_ocr(image)
 
-def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
+def processar_provas(agrupadas, gabarito, nota_minima):
     if not agrupadas:
         return [], {}
     resultados = []
@@ -91,14 +70,7 @@ def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
     for aluno, imagens in agrupadas.items():
         texto_completo = ''
         for img in imagens:
-            if metodo_ocr == "Tesseract":
-                texto = ocr_tesseract(img)
-            elif metodo_ocr == "TrOCR":
-                texto = ocr_trocr(img)
-            elif metodo_ocr == "LaTeX-OCR":
-                texto = ocr_latex(img)
-            else:
-                texto = ""
+            texto = ocr_latex(img)
             texto_completo += '\n' + texto
         textos_ocr[aluno] = texto_completo
 
@@ -168,7 +140,7 @@ def exibir_grafico(resultados):
     st.pyplot(fig)
 
 # ========== INTERFACE ==========
-st.title("Corretor de Provas com IA (Tesseract / TrOCR / LaTeX-OCR)")
+st.title("Corretor de Provas com IA - Foco em LaTeX-OCR")
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -179,7 +151,6 @@ with col3:
     data_prova = st.date_input("Data da Prova")
 
 nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
-metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR"] + (["LaTeX-OCR"] if LATEX_AVAILABLE else []))
 
 gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
 imagens_provas = st.file_uploader("Envie as provas dos alunos (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
@@ -191,7 +162,7 @@ if st.button("Corrigir Provas"):
         with st.spinner("Corrigindo..."):
             gabarito = extrair_gabarito(gabarito_pdf)
             agrupadas = agrupar_imagens_por_aluno(imagens_provas)
-            resultados, textos = processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr)
+            resultados, textos = processar_provas(agrupadas, gabarito, nota_minima)
 
         if resultados:
             st.success("Correção concluída!")
