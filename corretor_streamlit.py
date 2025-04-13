@@ -67,25 +67,32 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultados.append(resultado_aluno)
     return resultados
 
-def gerar_pdf_individual(resultado):
+def gerar_pdf_individual(resultado, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
     pdf.cell(200, 10, txt=f"Relatório - {resultado['Aluno']}", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Turma: {turma}", ln=True)
+    pdf.cell(200, 10, txt=f"Data da prova: {data_prova}", ln=True)
+    pdf.cell(200, 10, txt=f"Professor: {professor}", ln=True)
+    pdf.ln(10)
     for chave, valor in resultado.items():
         pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
     caminho = f"relatorios/individuais/{resultado['Aluno']}_relatorio.pdf"
     pdf.output(caminho)
 
-def gerar_pdf_geral(resultados):
+def gerar_pdf_geral(resultados, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="Relatório Geral de Resultados", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Relatório Geral - Turma: {turma}", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Data da prova: {data_prova}", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Professor: {professor}", ln=True, align='C')
+    pdf.ln(10)
     for resultado in resultados:
-        pdf.ln(5)
         for chave, valor in resultado.items():
             pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+        pdf.ln(5)
     pdf.output("relatorios/pdf/relatorio_geral.pdf")
 
 def gerar_excel(resultados):
@@ -113,6 +120,9 @@ def exibir_grafico(resultados):
 # Interface do usuário
 st.title("Corretor de Provas com IA")
 
+turma = st.text_input("Turma:")
+professor = st.text_input("Professor:")
+data_prova = st.date_input("Data da prova:")
 nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0, step=0.1)
 
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
@@ -135,9 +145,9 @@ if gabarito_pdf and imagens_provas:
     resultados = processar_provas(agrupadas, gabarito, nota_minima)
 
     for resultado in resultados:
-        gerar_pdf_individual(resultado)
+        gerar_pdf_individual(resultado, turma, professor, data_prova)
 
-    gerar_pdf_geral(resultados)
+    gerar_pdf_geral(resultados, turma, professor, data_prova)
     gerar_excel(resultados)
     salvar_historico(resultados)
 
