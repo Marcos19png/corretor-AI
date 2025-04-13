@@ -12,10 +12,9 @@ import unicodedata
 import io
 import tempfile
 import os
-
 from pix2tex.cli import LatexOCR
 
-# ========== CONFIGURAÇÃO ==========
+# ========== CONFIG ==========
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
@@ -140,7 +139,7 @@ def exibir_grafico(resultados):
     st.pyplot(fig)
 
 # ========== INTERFACE ==========
-st.title("Corretor de Provas com IA - Foco em LaTeX-OCR")
+st.title("Corretor de Provas com IA (LaTeX-OCR Especializado)")
 
 col1, col2, col3 = st.columns(3)
 with col1:
