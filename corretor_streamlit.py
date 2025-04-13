@@ -137,15 +137,15 @@ imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=[
 if gabarito_pdf and imagens_provas:
     st.info("Processando correção...")
 
-    with open(f"uploads/gabarito_{gabarito_pdf.name}", "wb") as f:
+    gabarito_caminho = f"uploads/gabarito_{gabarito_pdf.name}"
+    with open(gabarito_caminho, "wb") as f:
         f.write(gabarito_pdf.read())
 
     for imagem in imagens_provas:
         with open(f"uploads/prova_{imagem.name}", "wb") as f:
             f.write(imagem.read())
 
-    gabarito_pdf.seek(0)
-    gabarito = extrair_gabarito(gabarito_pdf)
+    gabarito = extrair_gabarito(gabarito_caminho)
     agrupadas = agrupar_imagens_por_aluno(imagens_provas)
     resultados = processar_provas(agrupadas, gabarito, nota_minima)
 
