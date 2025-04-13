@@ -119,7 +119,7 @@ def exibir_grafico(resultados):
     st.pyplot(fig)
 
 # Interface
-st.title("Corretor de Provas com IA (OCR + PDF)")
+st.title("Corretor de Provas de Matemática com IA (OCR + PDF)")
 
 turma = st.text_input("Turma:")
 professor = st.text_input("Professor:")
@@ -142,12 +142,4 @@ if st.button("Corrigir Provas"):
         excel_memoria = gerar_excel_em_memoria(resultados)
 
         st.download_button("Baixar PDFs Individuais (ZIP)", zip_pdf, file_name="relatorios_individuais.zip")
-        st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
-
-        exibir_grafico(resultados)
-
-        with st.expander("Mostrar texto OCR extraído dos alunos"):
-            for aluno, texto in textos_ocr.items():
-                st.text_area(f"{aluno}", texto, height=200)
-    else:
-        st.warning("Envie o gabarito e as imagens das provas antes de corrigir.")
+        st.download_button("Baixar Planilha Excel", excel_memoria, 
