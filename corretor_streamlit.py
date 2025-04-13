@@ -10,16 +10,14 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 import io
-import datetime
 
-# Configurar Tesseract
+# Detectar o caminho do Tesseract
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -83,8 +81,7 @@ def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf.cell(200, 10, txt=f"Professor: {professor}", ln=True)
     pdf.ln(10)
     for chave, valor in resultado.items():
-        if chave not in ['Aluno']:
-            pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+        pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
     conteudo_pdf = pdf.output(dest="S").encode("latin1")
     return io.BytesIO(conteudo_pdf)
 
@@ -105,12 +102,12 @@ def exibir_grafico(resultados):
     ax.set_title('Desempenho dos Alunos')
     st.pyplot(fig)
 
-# Interface Streamlit
-st.title("Corretor de Provas com IA (OCR + PDF)")
+# Interface
+st.title("Corretor de Provas com IA")
 
 turma = st.text_input("Turma:")
 professor = st.text_input("Professor:")
-data_prova = st.date_input("Data da prova:", value=datetime.date.today())
+data_prova = st.date_input("Data da prova:")
 nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0)
 
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
@@ -125,5 +122,17 @@ if st.button("Corrigir Provas"):
 
         st.success("Correção concluída!")
 
+        excel_memoria = gerar_excel_em_memoria(resultados)
+        st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
+
         for resultado in resultados:
-            pdf_buffer = gerar_pdf_individual_em_memoria(resultado, turma 
+            pdf_buffer = gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova)
+            st.download_button(f"Baixar PDF de {resultado['Aluno']}", pdf_buffer, file_name=f"{resultado['Aluno']}_relatorio.pdf")
+
+        exibir_grafico(resultados)
+
+        with st.expander("Mostrar texto OCR extraído dos alunos"):
+            for aluno, texto in textos_ocr.items():
+                st.text_area(f"{aluno}", texto, height=200)
+    else:
+        st.warning("Envie o gabarito e as imagens das provas antes de corrigir.")
