@@ -1,39 +1,43 @@
 import os
+import shutil
+import io
+import tempfile
+import re
+import unicodedata
+import difflib
 import streamlit as st
 import pytesseract
-import shutil
 from PIL import Image
 import pdfplumber
-import re
 import pandas as pd
 from fpdf import FPDF
 import matplotlib.pyplot as plt
-import difflib
-import unicodedata
-import io
-import tempfile
 
-# Configurar o diretório de checkpoints do pix2tex
-PIX2TEX_CHECKPOINT_DIR = os.path.join(os.getcwd(), ".pix2tex_checkpoints")
-os.environ["PIX2TEX_CHECKPOINT_DIR"] = PIX2TEX_CHECKPOINT_DIR
-os.makedirs(PIX2TEX_CHECKPOINT_DIR, exist_ok=True)
+# Configurar diretório para checkpoints do pix2tex
+PIX2TEX_DIR = os.path.join(os.getcwd(), ".pix2tex_checkpoints")
+os.environ["PIX2TEX_CHECKPOINT_DIR"] = PIX2TEX_DIR
+os.makedirs(PIX2TEX_DIR, exist_ok=True)
 
-from pix2tex.cli import LatexOCR
+# Importar LaTeX OCR
+try:
+    from pix2tex.cli import LatexOCR
+    LATEX_AVAILABLE = True
+    @st.cache_resource
+    def carregar_latex_ocr():
+        return LatexOCR()
+    latex_ocr = carregar_latex_ocr()
+except ImportError:
+    LATEX_AVAILABLE = False
+    latex_ocr = None
 
-# ========== CONFIG ==========
+# Configurar Tesseract
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-@st.cache_resource
-def carregar_latex_ocr():
-    return LatexOCR()
-
-latex_ocr = carregar_latex_ocr()
-
-# ========== FUNÇÕES ==========
+# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -63,11 +67,16 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas if agrupadas else ([], {})
 
+def ocr_tesseract(imagem):
+    return pytesseract.image_to_string(Image.open(imagem))
+
 def ocr_latex(imagem):
+    if not latex_ocr:
+        return "LaTeX OCR não disponível nesta instância."
     image = Image.open(imagem).convert("RGB")
     return latex_ocr(image)
 
-def processar_provas(agrupadas, gabarito, nota_minima):
+def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
     if not agrupadas:
         return [], {}
     resultados = []
@@ -75,7 +84,12 @@ def processar_provas(agrupadas, gabarito, nota_minima):
     for aluno, imagens in agrupadas.items():
         texto_completo = ''
         for img in imagens:
-            texto = ocr_latex(img)
+            if metodo_ocr == "Tesseract":
+                texto = ocr_tesseract(img)
+            elif metodo_ocr == "LaTeX-OCR":
+                texto = ocr_latex(img)
+            else:
+                texto = ""
             texto_completo += '\n' + texto
         textos_ocr[aluno] = texto_completo
 
@@ -144,8 +158,8 @@ def exibir_grafico(resultados):
     ax.set_title('Desempenho dos Alunos')
     st.pyplot(fig)
 
-# ========== INTERFACE ==========
-st.title("Corretor de Provas com IA (LaTeX-OCR Especializado)")
+# Interface
+st.title("Corretor de Provas com IA (Tesseract / LaTeX-OCR)")
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -156,6 +170,7 @@ with col3:
     data_prova = st.date_input("Data da Prova")
 
 nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
+metodo_ocr = st.selectbox("Método de OCR", ["Tesseract"] + (["LaTeX-OCR"] if LATEX_AVAILABLE else []))
 
 gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
 imagens_provas = st.file_uploader("Envie as provas dos alunos (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
@@ -167,7 +182,7 @@ if st.button("Corrigir Provas"):
         with st.spinner("Corrigindo..."):
             gabarito = extrair_gabarito(gabarito_pdf)
             agrupadas = agrupar_imagens_por_aluno(imagens_provas)
-            resultados, textos = processar_provas(agrupadas, gabarito, nota_minima)
+            resultados, textos = processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr)
 
         if resultados:
             st.success("Correção concluída!")
