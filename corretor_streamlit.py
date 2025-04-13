@@ -7,11 +7,10 @@ import pdfplumber
 import re
 from io import BytesIO
 
-# Configurações do Mathpix
-APP_ID = "SEU_APP_ID"
-APP_KEY = "SEU_APP_KEY"
+# Credenciais da API Mathpix
+APP_ID = "mathmindia_ea58bf"
+APP_KEY = "3330e99e78933441b0f66a816112d73c717ad7109cd93293a4ac9008572e987c"
 
-# Função para extrair texto usando Mathpix
 def mathpix_ocr(image_bytes):
     headers = {
         "app_id": APP_ID,
@@ -22,18 +21,12 @@ def mathpix_ocr(image_bytes):
         "src": f"data:image/jpeg;base64,{image_bytes}",
         "formats": ["text"]
     }
-    try:
-        response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers, timeout=20)
-        response.raise_for_status()
+    response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
+    if response.status_code == 200:
         return response.json().get("text", "")
-    except requests.exceptions.Timeout:
-        st.error("A requisição ao Mathpix demorou demais. Tente novamente.")
-        st.stop()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Erro ao acessar o Mathpix: {e}")
-        st.stop()
+    else:
+        return f"Erro na OCR: {response.text}"
 
-# Função para extrair gabarito com pesos do PDF
 @st.cache_data
 def extrair_gabarito(pdf_file):
     gabarito = {}
@@ -46,7 +39,6 @@ def extrair_gabarito(pdf_file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-# Função para processar imagens dos alunos
 def processar_provas(imagens, gabarito):
     resultados = []
     for img in imagens:
@@ -74,22 +66,27 @@ def processar_provas(imagens, gabarito):
 
     return pd.DataFrame(resultados)
 
-# Interface do Streamlit
-st.title("🧮 Corretor de Provas com Mathpix")
+st.set_page_config(page_title="Corretor de Provas", layout="wide")
+st.title("Corretor Automático de Provas com Mathpix")
 
-st.header("1. Enviar Gabarito (PDF com pesos)")
-gabarito_pdf = st.file_uploader("Gabarito", type=["pdf"])
-
-st.header("2. Enviar Imagens das Provas dos Alunos")
-uploaded_files = st.file_uploader("Imagens dos Alunos", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+col1, col2 = st.columns(2)
+with col1:
+    gabarito_pdf = st.file_uploader("1. Envie o Gabarito (PDF)", type=["pdf"])
+with col2:
+    uploaded_files = st.file_uploader("2. Envie as Provas dos Alunos (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
 if st.button("Corrigir Provas"):
     if not gabarito_pdf or not uploaded_files:
-        st.error("Por favor, envie o gabarito e as provas dos alunos.")
+        st.error("Você precisa enviar o gabarito e as imagens das provas.")
     else:
-        gabarito = extrair_gabarito(gabarito_pdf)
-        df_resultados = processar_provas(uploaded_files, gabarito)
-        st.success("Correção concluída!")
-        st.dataframe(df_resultados)
-        csv = df_resultados.to_csv(index=False).encode('utf-8')
-        st.download_button("Baixar Resultados em CSV", data=csv, file_name="resultados.csv", mime='text/csv')
+        with st.spinner("Corrigindo provas..."):
+            try:
+                gabarito = extrair_gabarito(gabarito_pdf)
+                df_resultados = processar_provas(uploaded_files, gabarito)
+                st.success("Correção concluída!")
+                st.dataframe(df_resultados)
+
+                csv = df_resultados.to_csv(index=False).encode('utf-8')
+                st.download_button("Baixar Resultados em CSV", csv, "resultados.csv", "text/csv")
+            except Exception as e:
+                st.error(f"Ocorreu um erro: {e}")
