@@ -10,25 +10,23 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 
-# Criar diretórios se não existirem
+# Criar diretórios
 os.makedirs("relatorios/pdf", exist_ok=True)
 os.makedirs("relatorios/excel", exist_ok=True)
+os.makedirs("relatorios/individuais", exist_ok=True)
 os.makedirs("uploads", exist_ok=True)
 
-# Função para remover acentos e normalizar texto
+# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(c for c in texto if not unicodedata.combining(c))
-    return texto
+    return ''.join(c for c in texto if not unicodedata.combining(c))
 
-# Comparação com tolerância de similaridade
 def etapa_correspondente(etapa_gabarito, texto_aluno):
     etapa_norm = normalizar(etapa_gabarito)
     texto_norm = normalizar(texto_aluno)
     return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.85)
 
-# Extrair etapas e pesos do gabarito
 def extrair_gabarito(pdf_path):
     gabarito = {}
     with pdfplumber.open(pdf_path) as pdf:
@@ -40,60 +38,69 @@ def extrair_gabarito(pdf_path):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-# Processar imagens das provas
-def processar_provas(imagens, gabarito):
-    resultados = []
+def agrupar_imagens_por_aluno(imagens):
+    agrupadas = {}
     for imagem in imagens:
-        nome_aluno = os.path.splitext(os.path.basename(imagem.name))[0]
-        imagem_pil = Image.open(imagem)
-        texto = pytesseract.image_to_string(imagem_pil)
-        resultado_aluno = {'Aluno': nome_aluno}
+        nome = os.path.splitext(imagem.name)[0]
+        aluno = re.sub(r'_pag\d+', '', nome)
+        agrupadas.setdefault(aluno, []).append(imagem)
+    return agrupadas
+
+def processar_provas(agrupadas, gabarito, nota_minima):
+    resultados = []
+    for aluno, imagens in agrupadas.items():
+        texto_completo = ''
+        for img in imagens:
+            texto = pytesseract.image_to_string(Image.open(img))
+            texto_completo += '\n' + texto
+        resultado_aluno = {'Aluno': aluno}
         nota_total = 0
         for q, etapas in gabarito.items():
             nota_q = 0
             for etapa, peso in etapas:
-                if etapa_correspondente(etapa, texto):
+                if etapa_correspondente(etapa, texto_completo):
                     nota_q += peso
-            resultado_aluno[q] = nota_q
+            resultado_aluno[q] = round(nota_q, 2)
             nota_total += nota_q
-        resultado_aluno['Nota Total'] = nota_total
-        resultado_aluno['Status'] = 'Aprovado' if nota_total >= 0.6 else 'Reprovado'
+        resultado_aluno['Nota Total'] = round(nota_total, 2)
+        resultado_aluno['Status'] = 'Aprovado' if nota_total >= nota_minima else 'Reprovado'
         resultados.append(resultado_aluno)
     return resultados
 
-# Gerar PDF com resultados
-def gerar_pdf(resultados, pagina):
+def gerar_pdf_individual(resultado):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt=f"Relatório de Resultados - Página {pagina}", ln=True, align='C')
-    for resultado in resultados:
-        pdf.ln(10)
-        pdf.cell(200, 10, txt=f"Aluno: {resultado['Aluno']}", ln=True)
-        for chave, valor in resultado.items():
-            if chave not in ['Aluno', 'Nota Total', 'Status']:
-                pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
-        pdf.cell(200, 10, txt=f"Nota Total: {resultado['Nota Total']}", ln=True)
-        pdf.cell(200, 10, txt=f"Status: {resultado['Status']}", ln=True)
-    pdf.output(f"relatorios/pdf/relatorio_resultados_pagina_{pagina}.pdf")
+    pdf.cell(200, 10, txt=f"Relatório - {resultado['Aluno']}", ln=True, align='C')
+    for chave, valor in resultado.items():
+        pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+    caminho = f"relatorios/individuais/{resultado['Aluno']}_relatorio.pdf"
+    pdf.output(caminho)
 
-# Gerar planilha Excel
+def gerar_pdf_geral(resultados):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+    pdf.cell(200, 10, txt="Relatório Geral de Resultados", ln=True, align='C')
+    for resultado in resultados:
+        pdf.ln(5)
+        for chave, valor in resultado.items():
+            pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+    pdf.output("relatorios/pdf/relatorio_geral.pdf")
+
 def gerar_excel(resultados):
     df = pd.DataFrame(resultados)
     df.to_excel("relatorios/excel/relatorio_resultados.xlsx", index=False)
 
-# Salvar histórico geral
 def salvar_historico(resultados):
     df_novo = pd.DataFrame(resultados)
-    caminho_historico = "historico.csv"
-    if os.path.exists(caminho_historico):
-        df_existente = pd.read_csv(caminho_historico)
+    if os.path.exists("historico.csv"):
+        df_existente = pd.read_csv("historico.csv")
         df_total = pd.concat([df_existente, df_novo], ignore_index=True)
     else:
         df_total = df_novo
-    df_total.to_csv(caminho_historico, index=False)
+    df_total.to_csv("historico.csv", index=False)
 
-# Gráfico de desempenho
 def exibir_grafico(resultados):
     nomes = [r['Aluno'] for r in resultados]
     notas = [r['Nota Total'] for r in resultados]
@@ -103,39 +110,43 @@ def exibir_grafico(resultados):
     ax.set_title('Desempenho dos Alunos')
     st.pyplot(fig)
 
-# Interface
+# Interface do usuário
 st.title("Corretor de Provas com IA")
+
+nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0, step=0.1)
 
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
 imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
 if gabarito_pdf and imagens_provas:
-    # Salvar os arquivos
-    gabarito_path = f"uploads/gabarito_{gabarito_pdf.name}"
-    with open(gabarito_path, "wb") as f:
+    st.info("Processando correção...")
+
+    # Salvar arquivos
+    with open(f"uploads/gabarito_{gabarito_pdf.name}", "wb") as f:
         f.write(gabarito_pdf.read())
 
-    prova_paths = []
     for imagem in imagens_provas:
-        path = f"uploads/prova_{imagem.name}"
-        with open(path, "wb") as f:
+        with open(f"uploads/prova_{imagem.name}", "wb") as f:
             f.write(imagem.read())
-        prova_paths.append(path)
 
     gabarito_pdf.seek(0)
     gabarito = extrair_gabarito(gabarito_pdf)
-    resultados = processar_provas(imagens_provas, gabarito)
+    agrupadas = agrupar_imagens_por_aluno(imagens_provas)
+    resultados = processar_provas(agrupadas, gabarito, nota_minima)
 
-    gerar_pdf(resultados, pagina=1)
+    for resultado in resultados:
+        gerar_pdf_individual(resultado)
+
+    gerar_pdf_geral(resultados)
     gerar_excel(resultados)
     salvar_historico(resultados)
 
     st.success("Correção concluída!")
 
-    with open("relatorios/pdf/relatorio_resultados_pagina_1.pdf", "rb") as pdf_file:
-        st.download_button("Baixar Relatório PDF", pdf_file, file_name="relatorio_resultados.pdf")
+    with open("relatorios/pdf/relatorio_geral.pdf", "rb") as f:
+        st.download_button("Baixar Relatório Geral PDF", f, file_name="relatorio_geral.pdf")
 
-    with open("relatorios/excel/relatorio_resultados.xlsx", "rb") as excel_file:
-        st.download_button("Baixar Planilha Excel", excel_file, file_name="relatorio_resultados.xlsx")
+    with open("relatorios/excel/relatorio_resultados.xlsx", "rb") as f:
+        st.download_button("Baixar Planilha Excel", f, file_name="relatorio_resultados.xlsx")
 
     exibir_grafico(resultados)
