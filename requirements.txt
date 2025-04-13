@@ -18,3 +18,5 @@ scikit-image
 sympy
 einops
 levenshtein
+transformers==4.19.0
+torch==1.11.0
