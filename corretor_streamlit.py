@@ -1,5 +1,6 @@
 import streamlit as st
 import pytesseract
+import shutil
 from PIL import Image
 import pdfplumber
 import os
@@ -10,8 +11,12 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 
-# Caminho fixo para o Tesseract no Windows
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Detectar o caminho do Tesseract dinamicamente (compatível com nuvem e Windows)
+tesseract_path = shutil.which("tesseract")
+if tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
+else:
+    st.warning("Tesseract não encontrado. Se estiver rodando localmente, instale o Tesseract OCR.")
 
 # Criar pastas com segurança
 for pasta in [
@@ -23,7 +28,6 @@ for pasta in [
 ]:
     os.makedirs(pasta, exist_ok=True)
 
-# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -77,7 +81,6 @@ def processar_provas(agrupadas, gabarito, nota_minima):
 def gerar_pdf_individual(resultado, turma, professor, data_prova):
     pasta_turma = f"relatorios/individuais/{turma}"
     os.makedirs(pasta_turma, exist_ok=True)
-
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
