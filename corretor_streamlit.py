@@ -10,15 +10,16 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 import io
+import datetime
 
-# Configurar Tesseract (compatível com Streamlit Cloud)
+# Configurar Tesseract
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-# Normalização e comparação tolerante
+# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -29,7 +30,6 @@ def etapa_correspondente(etapa_gabarito, texto_aluno):
     texto_norm = normalizar(texto_aluno)
     return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.8)
 
-# Gabarito a partir do PDF
 def extrair_gabarito(file):
     gabarito = {}
     with pdfplumber.open(file) as pdf:
@@ -41,7 +41,6 @@ def extrair_gabarito(file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-# Agrupar imagens por aluno
 def agrupar_imagens_por_aluno(imagens):
     agrupadas = {}
     for imagem in imagens:
@@ -50,7 +49,6 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas
 
-# Processar imagens e calcular nota
 def processar_provas(agrupadas, gabarito, nota_minima):
     resultados = []
     textos_ocr = {}
@@ -75,7 +73,6 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultados.append(resultado)
     return resultados, textos_ocr
 
-# Geração de PDF individual com gráfico
 def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
@@ -86,11 +83,11 @@ def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf.cell(200, 10, txt=f"Professor: {professor}", ln=True)
     pdf.ln(10)
     for chave, valor in resultado.items():
-        pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+        if chave not in ['Aluno']:
+            pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
     conteudo_pdf = pdf.output(dest="S").encode("latin1")
     return io.BytesIO(conteudo_pdf)
 
-# Geração de planilha Excel
 def gerar_excel_em_memoria(resultados):
     df = pd.DataFrame(resultados)
     excel_buffer = io.BytesIO()
@@ -99,7 +96,6 @@ def gerar_excel_em_memoria(resultados):
     excel_buffer.seek(0)
     return excel_buffer
 
-# Exibir gráfico geral de desempenho
 def exibir_grafico(resultados):
     nomes = [r['Aluno'] for r in resultados]
     notas = [r['Nota Total'] for r in resultados]
@@ -114,7 +110,7 @@ st.title("Corretor de Provas com IA (OCR + PDF)")
 
 turma = st.text_input("Turma:")
 professor = st.text_input("Professor:")
-data_prova = st.date_input("Data da prova:")
+data_prova = st.date_input("Data da prova:", value=datetime.date.today())
 nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0)
 
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
@@ -129,22 +125,5 @@ if st.button("Corrigir Provas"):
 
         st.success("Correção concluída!")
 
-        # Geração de planilha Excel
-        excel_memoria = gerar_excel_em_memoria(resultados)
-        st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
-
-        # Exibir gráfico geral
-        exibir_grafico(resultados)
-
-        # Exibir texto OCR extraído
-        with st.expander("Mostrar texto OCR extraído dos alunos"):
-            for aluno, texto in textos_ocr.items():
-                st.text_area(f"{aluno}", texto, height=200)
-
-        # Geração de relatórios PDF individuais
-        st.subheader("Relatórios Individuais")
         for resultado in resultados:
-            pdf_buffer = gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova)
-            st.download_button(f"Baixar Relatório de {resultado['Aluno']}", pdf_buffer, file_name=f"{resultado['Aluno']}_relatorio.pdf")
-    else:
-        st.warning("Env 
+            pdf_buffer = gerar_pdf_individual_em_memoria(resultado, turma 
