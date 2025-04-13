@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 
-# Caminho do executável do Tesseract OCR (ajuste se necessário)
+# Caminho fixo para o Tesseract no Windows
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-# Criar diretórios principais com segurança
+# Criar pastas com segurança
 for pasta in [
     "relatorios",
     "relatorios/pdf",
