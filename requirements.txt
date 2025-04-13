@@ -8,3 +8,7 @@ openpyxl
 unicodedata2
 matplotlib
 seaborn
+transformers
+torch
+sentencepiece
+protobuf==3.20.1
