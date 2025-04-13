@@ -8,8 +8,8 @@ import re
 from io import BytesIO
 
 # Configurações do Mathpix
-APP_ID = "mathmindia_ea58bf"
-APP_KEY = "3330e99e78933441b0f66a816112d73c717ad7109cd93293a4ac9008572e987c"
+APP_ID = "SEU_APP_ID"
+APP_KEY = "SEU_APP_KEY"
 
 # Função para extrair texto usando Mathpix
 def mathpix_ocr(image_bytes):
@@ -22,8 +22,16 @@ def mathpix_ocr(image_bytes):
         "src": f"data:image/jpeg;base64,{image_bytes}",
         "formats": ["text"]
     }
-    response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
-    return response.json().get("text", "")
+    try:
+        response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers, timeout=20)
+        response.raise_for_status()
+        return response.json().get("text", "")
+    except requests.exceptions.Timeout:
+        st.error("A requisição ao Mathpix demorou demais. Tente novamente.")
+        st.stop()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Erro ao acessar o Mathpix: {e}")
+        st.stop()
 
 # Função para extrair gabarito com pesos do PDF
 @st.cache_data
