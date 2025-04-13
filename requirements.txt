@@ -1,8 +1,8 @@
 streamlit
+requests
 pillow
 pdfplumber
-fpdf
 pandas
-matplotlib
 openpyxl
-requests
+matplotlib
+fpdf
