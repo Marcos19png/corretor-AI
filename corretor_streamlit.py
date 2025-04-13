@@ -91,8 +91,8 @@ def gerar_pdf_geral(resultados, professor, turma, data_prova):
         linha = f"{r['Aluno']}: Nota = {r['Nota Total']} - {r['Status']}"
         pdf.cell(200, 10, txt=linha, ln=True)
     output = BytesIO()
-    pdf.output(output)
-    return output.getvalue()
+    pdf_bytes = pdf.output(dest='S').encode('latin1')
+return pdf_bytes
 
 # Gráfico de desempenho
 def plotar_grafico(resultados):
