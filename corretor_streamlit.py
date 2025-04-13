@@ -158,4 +158,29 @@ with col3:
 nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
 
 gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
-imagens_provas = st.file_uploader("Envie as provas dos alunos (JPG, PNG)", 
+imagens_provas = st.file_uploader("Envie as provas dos alunos (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+
+if st.button("Corrigir Provas"):
+    if not gabarito_pdf or not imagens_provas:
+        st.warning("Por favor, envie o gabarito e as imagens das provas.")
+    else:
+        with st.spinner("Corrigindo..."):
+            gabarito = extrair_gabarito(gabarito_pdf)
+            agrupadas = agrupar_imagens_por_aluno(imagens_provas)
+            resultados, textos = processar_provas(agrupadas, gabarito, nota_minima)
+
+        if resultados:
+            st.success("Correção concluída!")
+            exibir_grafico(resultados)
+            excel = gerar_excel_em_memoria(resultados)
+            st.download_button("Baixar Excel", excel, file_name="resultado_provas.xlsx")
+
+            for resultado in resultados:
+                pdf_file = gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova)
+                st.download_button(f"Baixar PDF de {resultado['Aluno']}", pdf_file, file_name=f"{resultado['Aluno']}.pdf")
+
+            with st.expander("Visualizar OCR extraído"):
+                for aluno, texto in textos.items():
+                    st.text_area(f"{aluno}", texto, height=200)
+        else:
+            st.warning("Nenhuma prova foi processada.")
