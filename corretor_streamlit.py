@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 
-# Criar diretórios
+# Criar diretórios principais
 os.makedirs("relatorios/pdf", exist_ok=True)
 os.makedirs("relatorios/excel", exist_ok=True)
 os.makedirs("relatorios/individuais", exist_ok=True)
@@ -67,7 +67,11 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultados.append(resultado_aluno)
     return resultados
 
+# ATUALIZAÇÃO: Salva PDF individual dentro de subpasta com nome da turma
 def gerar_pdf_individual(resultado, turma, professor, data_prova):
+    pasta_turma = f"relatorios/individuais/{turma}"
+    os.makedirs(pasta_turma, exist_ok=True)
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -78,7 +82,7 @@ def gerar_pdf_individual(resultado, turma, professor, data_prova):
     pdf.ln(10)
     for chave, valor in resultado.items():
         pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
-    caminho = f"relatorios/individuais/{resultado['Aluno']}_relatorio.pdf"
+    caminho = os.path.join(pasta_turma, f"{resultado['Aluno']}_relatorio.pdf")
     pdf.output(caminho)
 
 def gerar_pdf_geral(resultados, turma, professor, data_prova):
@@ -131,7 +135,6 @@ imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=[
 if gabarito_pdf and imagens_provas:
     st.info("Processando correção...")
 
-    # Salvar arquivos
     with open(f"uploads/gabarito_{gabarito_pdf.name}", "wb") as f:
         f.write(gabarito_pdf.read())
 
