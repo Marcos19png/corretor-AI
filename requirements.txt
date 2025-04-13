@@ -1,10 +1,7 @@
-streamlit
-pytesseract
-pillow
-pdfplumber
-fpdf
-pandas
-openpyxl
-matplotlib
-pix2tex
-torch
+streamlit==1.30.0
+pillow==10.2.0
+pandas==2.2.1
+matplotlib==3.8.3
+fpdf==1.7.2
+openpyxl==3.1.2
+requests==2.31.0
