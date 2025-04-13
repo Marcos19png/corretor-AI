@@ -12,3 +12,9 @@ transformers
 torch
 sentencepiece
 protobuf==3.20.1
+pix2tex
+opencv-python
+scikit-image
+sympy
+einops
+levenshtein
