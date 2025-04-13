@@ -10,16 +10,16 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 import io
-import zipfile
+import tempfile
 
-# Configurar Tesseract (compatível com Streamlit Cloud)
+# Configurar Tesseract
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-# Normalização e comparação tolerante
+# Funções auxiliares
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -30,7 +30,6 @@ def etapa_correspondente(etapa_gabarito, texto_aluno):
     texto_norm = normalizar(texto_aluno)
     return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.8)
 
-# Gabarito a partir do PDF
 def extrair_gabarito(file):
     gabarito = {}
     with pdfplumber.open(file) as pdf:
@@ -42,7 +41,6 @@ def extrair_gabarito(file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-# Agrupar imagens por aluno
 def agrupar_imagens_por_aluno(imagens):
     agrupadas = {}
     for imagem in imagens:
@@ -51,7 +49,6 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas
 
-# Processar imagens e calcular nota
 def processar_provas(agrupadas, gabarito, nota_minima):
     resultados = []
     textos_ocr = {}
@@ -76,8 +73,20 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultados.append(resultado)
     return resultados, textos_ocr
 
-# Geração de PDF
-def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
+def gerar_grafico(aluno, nota_total):
+    fig, ax = plt.subplots(figsize=(4, 2))
+    ax.barh([aluno], [nota_total], color='skyblue')
+    ax.set_xlim(0, 10)
+    ax.set_xlabel('Nota Total')
+    ax.set_title('Desempenho')
+    buf = io.BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format='png')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+def gerar_pdf_individual(resultado, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -86,3 +95,60 @@ def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf.cell(200, 10, txt=f"Data da prova: {data_prova}", ln=True)
     pdf.cell(200, 10, txt=f"Professor: {professor}", ln=True)
     pdf.ln(10)
+    for chave, valor in resultado.items():
+        if chave not in ['Aluno']:
+            pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
+
+    # Adicionar gráfico
+    grafico = gerar_grafico(resultado['Aluno'], resultado['Nota Total'])
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
+        tmpfile.write(grafico.read())
+        tmpfile.flush()
+        pdf.image(tmpfile.name, x=10, y=pdf.get_y(), w=pdf.w - 20)
+    return pdf.output(dest='S').encode('latin1')
+
+def gerar_excel_em_memoria(resultados):
+    df = pd.DataFrame(resultados)
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    excel_buffer.seek(0)
+    return excel_buffer
+
+# Interface
+st.title("Corretor de Provas com IA (OCR + PDF) - Matemática")
+
+turma = st.text_input("Turma:")
+professor = st.text_input("Professor:")
+data_prova = st.date_input("Data da prova:")
+nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, max_value=10.0, value=6.0)
+
+gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
+imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+
+if st.button("Corrigir Provas"):
+    if gabarito_pdf and imagens_provas:
+        with st.spinner("Corrigindo provas..."):
+            gabarito = extrair_gabarito(gabarito_pdf)
+            agrupadas = agrupar_imagens_por_aluno(imagens_provas)
+            resultados, textos_ocr = processar_provas(agrupadas, gabarito, nota_minima)
+
+        st.success("Correção concluída!")
+
+        excel_memoria = gerar_excel_em_memoria(resultados)
+        st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
+
+        for resultado in resultados:
+            pdf_bytes = gerar_pdf_individual(resultado, turma, professor, data_prova)
+            st.download_button(
+                label=f"Baixar PDF - {resultado['Aluno']}",
+                data=pdf_bytes,
+                file_name=f"{resultado['Aluno']}_relatorio.pdf",
+                mime='application/pdf'
+            )
+
+        with st.expander("Mostrar texto OCR extraído dos alunos"):
+            for aluno, texto in textos_ocr.items():
+                st.text_area(f"{aluno}", texto, height=200)
+    else:
+        
