@@ -12,14 +12,14 @@ import unicodedata
 import io
 import zipfile
 
-# Detectar o caminho do Tesseract (compatível com Streamlit Cloud)
+# Configurar Tesseract (compatível com Streamlit Cloud)
 tesseract_path = shutil.which("tesseract")
 if tesseract_path:
     pytesseract.pytesseract.tesseract_cmd = tesseract_path
 else:
     st.warning("Tesseract não encontrado.")
 
-# Funções
+# Normalização e comparação tolerante
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -28,8 +28,9 @@ def normalizar(texto):
 def etapa_correspondente(etapa_gabarito, texto_aluno):
     etapa_norm = normalizar(etapa_gabarito)
     texto_norm = normalizar(texto_aluno)
-    return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.85)
+    return difflib.get_close_matches(etapa_norm, texto_norm.split(), n=1, cutoff=0.8)
 
+# Gabarito a partir do PDF
 def extrair_gabarito(file):
     gabarito = {}
     with pdfplumber.open(file) as pdf:
@@ -41,6 +42,7 @@ def extrair_gabarito(file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
+# Agrupar imagens por aluno
 def agrupar_imagens_por_aluno(imagens):
     agrupadas = {}
     for imagem in imagens:
@@ -49,13 +51,17 @@ def agrupar_imagens_por_aluno(imagens):
         agrupadas.setdefault(aluno, []).append(imagem)
     return agrupadas
 
+# Processar imagens e calcular nota
 def processar_provas(agrupadas, gabarito, nota_minima):
     resultados = []
+    textos_ocr = {}
     for aluno, imagens in agrupadas.items():
         texto_completo = ''
         for img in imagens:
             texto = pytesseract.image_to_string(Image.open(img))
             texto_completo += '\n' + texto
+        textos_ocr[aluno] = texto_completo
+
         resultado = {'Aluno': aluno}
         nota_total = 0
         for q, etapas in gabarito.items():
@@ -68,8 +74,9 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultado['Nota Total'] = round(nota_total, 2)
         resultado['Status'] = 'Aprovado' if nota_total >= nota_minima else 'Reprovado'
         resultados.append(resultado)
-    return resultados
+    return resultados, textos_ocr
 
+# Geração de PDF
 def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf = FPDF()
     pdf.add_page()
@@ -81,11 +88,8 @@ def gerar_pdf_individual_em_memoria(resultado, turma, professor, data_prova):
     pdf.ln(10)
     for chave, valor in resultado.items():
         pdf.cell(200, 10, txt=f"{chave}: {valor}", ln=True)
-
-    # Corrigido: salvar conteúdo do PDF na memória
     conteudo_pdf = pdf.output(dest="S").encode("latin1")
-    buffer = io.BytesIO(conteudo_pdf)
-    return buffer
+    return io.BytesIO(conteudo_pdf)
 
 def gerar_pdf_zip(resultados, turma, professor, data_prova):
     zip_buffer = io.BytesIO()
@@ -115,7 +119,7 @@ def exibir_grafico(resultados):
     st.pyplot(fig)
 
 # Interface
-st.title("Corretor de Provas com IA (Nuvem)")
+st.title("Corretor de Provas com IA (OCR + PDF)")
 
 turma = st.text_input("Turma:")
 professor = st.text_input("Professor:")
@@ -125,19 +129,25 @@ nota_minima = st.number_input("Nota mínima para aprovação:", min_value=0.0, m
 gabarito_pdf = st.file_uploader("Envie o gabarito (PDF)", type="pdf")
 imagens_provas = st.file_uploader("Envie as provas dos alunos (imagens)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
-if gabarito_pdf and imagens_provas:
-    st.info("Processando...")
+if st.button("Corrigir Provas"):
+    if gabarito_pdf and imagens_provas:
+        with st.spinner("Corrigindo provas..."):
+            gabarito = extrair_gabarito(gabarito_pdf)
+            agrupadas = agrupar_imagens_por_aluno(imagens_provas)
+            resultados, textos_ocr = processar_provas(agrupadas, gabarito, nota_minima)
 
-    gabarito = extrair_gabarito(gabarito_pdf)
-    agrupadas = agrupar_imagens_por_aluno(imagens_provas)
-    resultados = processar_provas(agrupadas, gabarito, nota_minima)
+        st.success("Correção concluída!")
 
-    st.success("Correção concluída!")
+        zip_pdf = gerar_pdf_zip(resultados, turma, professor, data_prova)
+        excel_memoria = gerar_excel_em_memoria(resultados)
 
-    zip_pdf = gerar_pdf_zip(resultados, turma, professor, data_prova)
-    excel_memoria = gerar_excel_em_memoria(resultados)
+        st.download_button("Baixar PDFs Individuais (ZIP)", zip_pdf, file_name="relatorios_individuais.zip")
+        st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
 
-    st.download_button("Baixar PDFs Individuais (ZIP)", zip_pdf, file_name="relatorios_individuais.zip")
-    st.download_button("Baixar Planilha Excel", excel_memoria, file_name="relatorio_resultados.xlsx")
+        exibir_grafico(resultados)
 
-    exibir_grafico(resultados)
+        with st.expander("Mostrar texto OCR extraído dos alunos"):
+            for aluno, texto in textos_ocr.items():
+                st.text_area(f"{aluno}", texto, height=200)
+    else:
+        st.warning("Envie o gabarito e as imagens das provas antes de corrigir.")
