@@ -14,15 +14,14 @@ import tempfile
 import os
 import torch
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
-from pix2tex.cli import LatexOCR
 
-# ========== CONFIGURAÇÃO ==========
-tesseract_path = shutil.which("tesseract")
-if tesseract_path:
-    pytesseract.pytesseract.tesseract_cmd = tesseract_path
-else:
-    st.warning("Tesseract não encontrado.")
+try:
+    from pix2tex.cli import LatexOCR
+    LATEX_AVAILABLE = True
+except ImportError:
+    LATEX_AVAILABLE = False
 
+# ========== MODELOS ==========
 @st.cache_resource
 def carregar_trocr():
     processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
@@ -31,7 +30,9 @@ def carregar_trocr():
 
 @st.cache_resource
 def carregar_latex_ocr():
-    return LatexOCR()
+    if LATEX_AVAILABLE:
+        return LatexOCR()
+    return None
 
 processor, model = carregar_trocr()
 latex_ocr = carregar_latex_ocr()
@@ -77,6 +78,8 @@ def ocr_trocr(imagem):
     return generated_text
 
 def ocr_latex(imagem):
+    if not latex_ocr:
+        return "LaTeX OCR não disponível nesta instância."
     image = Image.open(imagem).convert("RGB")
     return latex_ocr(image)
 
@@ -176,7 +179,7 @@ with col3:
     data_prova = st.date_input("Data da Prova")
 
 nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
-metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR", "LaTeX-OCR"])
+metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR"] + (["LaTeX-OCR"] if LATEX_AVAILABLE else []))
 
 gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
 imagens_provas = st.file_uploader("Envie as provas dos alunos (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
