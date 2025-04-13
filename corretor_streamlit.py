@@ -14,6 +14,7 @@ import tempfile
 import os
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
+from pix2tex.cli import LatexOCR
 
 # Configurar Tesseract
 tesseract_path = shutil.which("tesseract")
@@ -22,16 +23,21 @@ if tesseract_path:
 else:
     st.warning("Tesseract não encontrado.")
 
-# Carregar modelo TrOCR
+# Carregar modelos OCR
 @st.cache_resource
 def carregar_trocr():
     processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-handwritten")
     model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-handwritten")
     return processor, model
 
-processor, model = carregar_trocr()
+@st.cache_resource
+def carregar_latex_ocr():
+    return LatexOCR()
 
-# Funções auxiliares
+processor, model = carregar_trocr()
+latex_ocr_model = carregar_latex_ocr()
+
+# Funções
 def normalizar(texto):
     texto = texto.lower()
     texto = unicodedata.normalize("NFKD", texto)
@@ -71,6 +77,10 @@ def ocr_trocr(imagem):
     generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
     return generated_text
 
+def ocr_latex(imagem):
+    image = Image.open(imagem).convert("RGB")
+    return latex_ocr_model(image)
+
 def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
     if not agrupadas:
         return [], {}
@@ -81,8 +91,10 @@ def processar_provas(agrupadas, gabarito, nota_minima, metodo_ocr):
         for img in imagens:
             if metodo_ocr == "Tesseract":
                 texto = ocr_tesseract(img)
-            else:
+            elif metodo_ocr == "TrOCR":
                 texto = ocr_trocr(img)
+            else:
+                texto = ocr_latex(img)
             texto_completo += '\n' + texto
         textos_ocr[aluno] = texto_completo
 
@@ -164,7 +176,7 @@ with col3:
     data_prova = st.date_input("Data da Prova")
 
 nota_minima = st.slider("Nota mínima para aprovação", 0.0, 10.0, 6.0, 0.5)
-metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR"])
+metodo_ocr = st.selectbox("Método de OCR", ["Tesseract", "TrOCR", "LaTeX-OCR"])
 
 gabarito_pdf = st.file_uploader("Envie o PDF do Gabarito", type=["pdf"])
 imagens_provas = st.file_uploader("Envie as imagens das provas (JPG, PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
@@ -180,15 +192,10 @@ if st.button("Corrigir Provas"):
 
             if resultados:
                 st.success("Correção concluída!")
-
-                # Exibir gráfico geral
                 exibir_grafico(resultados)
-
-                # Download da planilha Excel
                 excel_data = gerar_excel_em_memoria(resultados)
                 st.download_button("Baixar Resultado em Excel", excel_data, file_name="resultado_provas.xlsx")
 
-                # PDFs individuais
                 for resultado in resultados:
                     pdf_file = gerar_pdf_individual_com_grafico(resultado, turma, professor, data_prova)
                     st.download_button(f"Baixar PDF de {resultado['Aluno']}", pdf_file, file_name=f"{resultado['Aluno']}.pdf")
