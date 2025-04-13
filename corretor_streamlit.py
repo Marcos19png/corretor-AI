@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 import difflib
 import unicodedata
 
+# Caminho do executável do Tesseract OCR (ajuste se necessário)
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
 # Criar diretórios principais
 os.makedirs("relatorios/pdf", exist_ok=True)
 os.makedirs("relatorios/excel", exist_ok=True)
@@ -67,7 +70,6 @@ def processar_provas(agrupadas, gabarito, nota_minima):
         resultados.append(resultado_aluno)
     return resultados
 
-# ATUALIZAÇÃO: Salva PDF individual dentro de subpasta com nome da turma
 def gerar_pdf_individual(resultado, turma, professor, data_prova):
     pasta_turma = f"relatorios/individuais/{turma}"
     os.makedirs(pasta_turma, exist_ok=True)
