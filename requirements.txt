@@ -1,9 +1,9 @@
 streamlit
-opencv-python-headless
-pytesseract
-pdf2image
-numpy
-Pillow
-scikit-learn
+pillow
+pdfplumber
+fpdf
+pandas
 matplotlib
-reportlab
+openpyxl
+requests
+sympy
