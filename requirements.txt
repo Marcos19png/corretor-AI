@@ -1,9 +1,9 @@
-streamlit==1.32.2
-requests
-pillow
-pandas
+streamlit==1.32.0
+opencv-python-headless
+pytesseract
+pdf2image
+numpy
+Pillow
+scikit-learn
 matplotlib
-fpdf
-pdfplumber
-difflib
-openpyxl
+reportlab
