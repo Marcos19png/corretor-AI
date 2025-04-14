@@ -10,6 +10,8 @@ from io import BytesIO
 from datetime import datetime
 import pdfplumber
 import re
+from sympy import simplify
+from sympy.parsing.latex import parse_latex
 
 # Configuração da API Mathpix
 MATHPIX_APP_ID = "mathmindia_ea58bf"
@@ -53,9 +55,21 @@ def imagem_para_latex(imagem):
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return mathpix_ocr(img_str)
 
-# Compara etapas com base em similaridade
+# Compara etapas com base em equivalência simbólica
 def etapa_correspondente(etapa_gabarito, texto_aluno):
-    return etapa_gabarito.strip() in texto_aluno
+    try:
+        gabarito_expr = parse_latex(etapa_gabarito)
+        expressoes_aluno = re.findall(r'\\\(.+?\\\)', texto_aluno)
+        for exp_latex in expressoes_aluno:
+            try:
+                aluno_expr = parse_latex(exp_latex)
+                if simplify(gabarito_expr - aluno_expr) == 0:
+                    return True
+            except:
+                continue
+        return False
+    except:
+        return False
 
 # Processa as provas
 def processar_provas(arquivos_imagem, gabarito):
@@ -79,7 +93,6 @@ def processar_provas(arquivos_imagem, gabarito):
         resultados.append(resultado)
     return resultados, textos_ocr
 
-# Gerar PDF geral
 # Gerar PDF geral
 def gerar_pdf_geral(resultados, professor, turma, data_prova):
     pdf = FPDF()
