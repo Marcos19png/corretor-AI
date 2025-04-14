@@ -10,6 +10,8 @@ from io import BytesIO
 from datetime import datetime
 import pdfplumber
 import re
+from sympy import simplify
+from sympy.parsing.latex import parse_latex
 
 # Configuração da API Mathpix
 MATHPIX_APP_ID = "mathmindia_ea58bf"
@@ -53,18 +55,14 @@ def imagem_para_latex(imagem):
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return mathpix_ocr(img_str)
 
-from sympy import simplify, Eq
-from sympy.parsing.latex import parse_latex
-
+# Compara etapas com base simbólica
 def etapa_correspondente(etapa_gabarito, texto_aluno):
     try:
-        # Extrai expressões LaTeX do aluno (várias possíveis equações)
-        expressoes_aluno = re.findall(r"\\\(.+?\\\)", texto_aluno)
         gabarito_expr = parse_latex(etapa_gabarito)
-
-        for exp_latex in expressoes_aluno:
+        expressoes_aluno = re.findall(r'\\\(.+?\\\)', texto_aluno)
+        for exp in expressoes_aluno:
             try:
-                aluno_expr = parse_latex(exp_latex)
+                aluno_expr = parse_latex(exp)
                 if simplify(gabarito_expr - aluno_expr) == 0:
                     return True
             except:
@@ -95,7 +93,6 @@ def processar_provas(arquivos_imagem, gabarito):
         resultados.append(resultado)
     return resultados, textos_ocr
 
-# Gerar PDF geral
 # Gerar PDF geral
 def gerar_pdf_geral(resultados, professor, turma, data_prova):
     pdf = FPDF()
@@ -136,7 +133,7 @@ if st.button("Iniciar Correção"):
             gabarito = extrair_gabarito_pdf(gabarito_file)
         else:
             latex_gabarito = imagem_para_latex(gabarito_file)
-            gabarito = {"Q1": [(latex_gabarito, 1.0)]}  # Default
+            gabarito = {"Q1": [(latex_gabarito, 1.0)]}
 
         st.info("Corrigindo provas...")
         resultados, textos_ocr = processar_provas(arquivos_imagem, gabarito)
