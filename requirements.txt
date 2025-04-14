@@ -1,9 +1,9 @@
-streamlit
+streamlit==1.32.2
+requests
 pillow
-pdfplumber
-fpdf
 pandas
 matplotlib
+fpdf
+pdfplumber
+difflib
 openpyxl
-requests
-sympy
