@@ -30,10 +30,11 @@ def mathpix_ocr(image_bytes):
     }
     data = {
         "src": f"data:image/jpeg;base64,{image_bytes}",
-        "formats": ["latex_styled"]
+        "formats": ["snips"],
+        "ocr": ["math", "text"]
     }
     response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
-    return response.json().get("latex_styled", "")
+    return response.json().get("snips", [])
 
 def extrair_gabarito_pdf(pdf_file):
     gabarito = {}
@@ -46,43 +47,42 @@ def extrair_gabarito_pdf(pdf_file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-def imagem_para_latex(imagem):
+def imagem_para_snips(imagem):
     image = Image.open(imagem)
     buffer = BytesIO()
     image.save(buffer, format="JPEG")
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return mathpix_ocr(img_str)
 
-def etapa_correspondente(etapa_gabarito, latex_text):
+def etapa_correspondente(etapa_gabarito, snips_list):
     try:
         gabarito_expr = parse_latex(etapa_gabarito)
     except:
         return False
 
-    expressoes = re.findall(r'(\\\(.+?\\\))', latex_text)
-    for exp in expressoes:
-        clean = exp.strip('\\() ')
-        try:
-            aluno_expr = parse_latex(clean)
-            if simplify(gabarito_expr - aluno_expr) == 0:
-                return True
-        except:
-            continue
+    for snip in snips_list:
+        if "latex" in snip:
+            try:
+                aluno_expr = parse_latex(snip["latex"])
+                if simplify(gabarito_expr - aluno_expr) == 0:
+                    return True
+            except:
+                continue
     return False
 
 def processar_provas(imagens, gabarito):
     resultados = []
     textos_ocr = {}
     for img in imagens:
-        latex = imagem_para_latex(img)
+        snips = imagem_para_snips(img)
         aluno = os.path.splitext(img.name)[0]
-        textos_ocr[aluno] = latex
+        textos_ocr[aluno] = [s.get("latex", "") for s in snips if "latex" in s]
         resultado = {"Aluno": aluno}
         nota_total = 0
         for q, etapas in gabarito.items():
             nota_q = 0
             for etapa, peso in etapas:
-                if etapa_correspondente(etapa, latex):
+                if etapa_correspondente(etapa, snips):
                     nota_q += peso
             resultado[q] = round(nota_q, 2)
             nota_total += nota_q
@@ -125,8 +125,9 @@ if st.button("Iniciar Correção"):
         if gabarito_file.type == "application/pdf":
             gabarito = extrair_gabarito_pdf(gabarito_file)
         else:
-            latex = imagem_para_latex(gabarito_file)
-            gabarito = {"Q1": [(latex, 1.0)]}
+            snips = imagem_para_snips(gabarito_file)
+            formulas = [s.get("latex", "") for s in snips if "latex" in s]
+            gabarito = {"Q1": [(f, 1.0) for f in formulas]}
 
         st.info("Corrigindo provas...")
         resultados, textos = processar_provas(arquivos_imagem, gabarito)
@@ -143,9 +144,10 @@ if st.button("Iniciar Correção"):
         pdf = gerar_pdf_geral(resultados, professor, turma, data_prova)
         st.download_button("Baixar PDF", data=pdf, file_name="relatorio.pdf")
 
-        with st.expander("LaTeX Detectado"):
-            for aluno, latex in textos.items():
+        with st.expander("Fórmulas detectadas (LaTeX)"):
+            for aluno, formulas in textos.items():
                 st.markdown(f"**{aluno}**")
-                st.code(latex)
+                for f in formulas:
+                    st.code(f)
     else:
         st.warning("Envie o gabarito e as imagens das provas.")
