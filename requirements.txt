@@ -7,3 +7,4 @@ matplotlib
 openpyxl
 requests
 sympy
+pytesseract  # OCR de texto básico como fallback
