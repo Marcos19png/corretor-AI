@@ -1,2 +1,3 @@
-poppler-utils
-libgl1
+poppler-utils   # Necessário para pdfplumber (manipulação de PDFs)
+libgl1          # Necessário para PIL / matplotlib funcionar com imagens
+tesseract-ocr   # OCR de texto simples via pytesseract
