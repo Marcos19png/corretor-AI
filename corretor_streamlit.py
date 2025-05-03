@@ -2,8 +2,7 @@ import os
 import base64
 import streamlit as st
 import requests
-import pytesseract
-from PIL import Image, ImageEnhance, ImageOps
+from PIL import Image, ImageEnhance
 import pandas as pd
 import matplotlib.pyplot as plt
 from fpdf import FPDF
@@ -11,65 +10,40 @@ from io import BytesIO
 from datetime import datetime
 import pdfplumber
 import re
-import json
 from sympy import simplify
 from sympy.parsing.latex import parse_latex
 
-# ========== CONFIG MATHPIX ==========
+# ========== CONFIGURAÇÃO MATHPIX ==========
 MATHPIX_APP_ID = "mathmindia_ea58bf"
 MATHPIX_APP_KEY = "3330e99e78933441b0f66a816112d73c717ad7109cd93293a4ac9008572e987c"
-CACHE_FILE = "latex_cache.json"
+
+# ========== STREAMLIT ==========
+st.set_page_config(page_title="Corretor de Provas", layout="wide")
+st.title("🧠 Corretor de Provas com Mathpix + SymPy")
 
 # ========== FUNÇÕES ==========
-def carregar_cache():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def salvar_cache(cache):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(cache, f)
-
-latex_cache = carregar_cache()
-
-def preprocess_image(image):
-    img = Image.open(image).convert("L")
-    img = ImageOps.autocontrast(img)
-    img = img.resize((min(img.size[0], 1500), min(img.size[1], 2000)))
-    enhancer = ImageEnhance.Sharpness(img)
-    return enhancer.enhance(2.0)
-
-def image_to_base64(img):
-    buffer = BytesIO()
-    img.save(buffer, format="JPEG")
-    return base64.b64encode(buffer.getvalue()).decode()
-
-def mathpix_ocr(image_bytes_b64):
+def mathpix_ocr(image_bytes):
     headers = {
         "app_id": MATHPIX_APP_ID,
         "app_key": MATHPIX_APP_KEY,
         "Content-type": "application/json"
     }
     data = {
-        "src": f"data:image/jpeg;base64,{image_bytes_b64}",
-        "formats": ["latex_styled"]
+        "src": f"data:image/jpeg;base64,{image_bytes}",
+        "formats": ["latex_styled"],
+        "math_inline_delimiters": ["\\(", "\\)"],
+        "skip_recrop": True
     }
-    try:
-        r = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
-        if r.status_code == 200:
-            return r.json().get("latex_styled", "")
-    except:
-        pass
-    return ""
+    response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
+    return response.json().get("latex_styled", "")
 
-def fallback_ocr_pytesseract(image):
-    return pytesseract.image_to_string(image)
-
-def avaliar_confianca_latex(latex):
-    if len(latex) < 10 or "=" not in latex:
-        return "baixa"
-    return "alta"
+def imagem_para_latex(imagem):
+    image = Image.open(imagem).convert("RGB")
+    image = ImageEnhance.Contrast(image).enhance(2.0)
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG")
+    img_str = base64.b64encode(buffer.getvalue()).decode()
+    return mathpix_ocr(img_str)
 
 def extrair_gabarito_pdf(pdf_file):
     gabarito = {}
@@ -82,54 +56,45 @@ def extrair_gabarito_pdf(pdf_file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
+def extrair_expressoes(latex_text):
+    # Extrai expressões dentro de \( \)
+    expressoes = re.findall(r'\\\((.*?)\\\)', latex_text)
+
+    # Extrai de blocos \begin{array}
+    arrays = re.findall(r'\\begin{array}{.*?}(.*?)\\end{array}', latex_text, re.DOTALL)
+    for bloco in arrays:
+        linhas = bloco.split(r'\\')
+        for linha in linhas:
+            linha = linha.strip()
+            if '=' in linha:
+                expressoes.append(linha)
+    
+    return expressoes
+
 def etapa_correspondente(etapa_gabarito, latex_text):
     try:
-        expr_gab = parse_latex(etapa_gabarito)
+        gabarito_expr = parse_latex(etapa_gabarito)
     except:
         return False
-    expressoes = re.findall(r'(\\\(.+?\\\))', latex_text)
+
+    expressoes = extrair_expressoes(latex_text)
+
     for exp in expressoes:
-        clean = exp.strip('\\() ')
         try:
-            expr_aluno = parse_latex(clean)
-            if simplify(expr_gab - expr_aluno) == 0:
+            aluno_expr = parse_latex(exp)
+            if simplify(gabarito_expr - aluno_expr) == 0:
                 return True
         except:
             continue
     return False
 
-def imagem_para_latex(imagem, aluno_nome):
-    img = preprocess_image(imagem)
-    b64 = image_to_base64(img)
-
-    if aluno_nome in latex_cache:
-        return latex_cache[aluno_nome], "alta (cache)"
-
-    latex = mathpix_ocr(b64)
-    confianca = avaliar_confianca_latex(latex)
-
-    if not latex:
-        st.warning(f"Mathpix falhou. Usando fallback com OCR padrão para {aluno_nome}.")
-        latex = fallback_ocr_pytesseract(img)
-        confianca = "baixa (fallback)"
-
-    if confianca == "baixa":
-        st.warning(f"Baixa confiança no LaTeX de {aluno_nome}. Reveja e edite abaixo:")
-        st.image(img, caption="Imagem da prova")
-        latex = st.text_area(f"LaTeX detectado para {aluno_nome}:", value=latex)
-
-    latex_cache[aluno_nome] = latex
-    salvar_cache(latex_cache)
-    return latex, confianca
-
 def processar_provas(imagens, gabarito):
     resultados = []
-    latex_detectados = {}
+    textos_ocr = {}
     for img in imagens:
+        latex = imagem_para_latex(img)
         aluno = os.path.splitext(img.name)[0]
-        latex, confianca = imagem_para_latex(img, aluno)
-        latex_detectados[aluno] = {"latex": latex, "confianca": confianca}
-
+        textos_ocr[aluno] = latex
         resultado = {"Aluno": aluno}
         nota_total = 0
         for q, etapas in gabarito.items():
@@ -142,7 +107,7 @@ def processar_provas(imagens, gabarito):
         resultado["Nota Total"] = round(nota_total, 2)
         resultado["Status"] = "Aprovado" if nota_total >= 6.0 else "Reprovado"
         resultados.append(resultado)
-    return resultados, latex_detectados
+    return resultados, textos_ocr
 
 def gerar_pdf_geral(resultados, professor, turma, data_prova):
     pdf = FPDF()
@@ -162,10 +127,7 @@ def plotar_grafico(resultados):
     plt.xticks(rotation=90)
     st.pyplot(fig)
 
-# ========== INTERFACE STREAMLIT ==========
-st.set_page_config(page_title="Corretor de Provas", layout="wide")
-st.title("🧠 Corretor de Provas com Mathpix + SymPy")
-
+# ========== INTERFACE ==========
 st.sidebar.header("Informações da Prova")
 professor = st.sidebar.text_input("Nome do Professor")
 turma = st.sidebar.text_input("Nome da Turma")
@@ -181,11 +143,11 @@ if st.button("Iniciar Correção"):
         if gabarito_file.type == "application/pdf":
             gabarito = extrair_gabarito_pdf(gabarito_file)
         else:
-            latex, _ = imagem_para_latex(gabarito_file, "gabarito")
+            latex = imagem_para_latex(gabarito_file)
             gabarito = {"Q1": [(latex, 1.0)]}
 
         st.info("Corrigindo provas...")
-        resultados, latex_detectados = processar_provas(arquivos_imagem, gabarito)
+        resultados, textos = processar_provas(arquivos_imagem, gabarito)
 
         st.success("Correção concluída!")
         st.dataframe(pd.DataFrame(resultados))
@@ -199,9 +161,9 @@ if st.button("Iniciar Correção"):
         pdf = gerar_pdf_geral(resultados, professor, turma, data_prova)
         st.download_button("Baixar PDF", data=pdf, file_name="relatorio.pdf")
 
-        st.subheader("LaTeX Detectado por Aluno")
-        for aluno, info in latex_detectados.items():
-            st.markdown(f"**{aluno}** (Confiança: {info['confianca']})")
-            st.code(info["latex"])
+        with st.expander("LaTeX Detectado"):
+            for aluno, latex in textos.items():
+                st.markdown(f"**{aluno}**")
+                st.code(latex)
     else:
         st.warning("Envie o gabarito e as imagens das provas.")
