@@ -7,4 +7,5 @@ matplotlib
 openpyxl
 requests
 sympy
-
+opencv-python-headless
+numpy
