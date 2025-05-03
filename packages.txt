@@ -1,2 +1,2 @@
-poppler-utils   # Necessário para pdfplumber (manipulação de PDFs)
-libgl1          # Necessário para PIL / matplotlib funcionar com imagens
+poppler-utils
+libgl1-mesa-glx
