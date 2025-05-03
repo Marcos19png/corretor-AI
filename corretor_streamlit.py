@@ -12,8 +12,11 @@ import pdfplumber
 import re
 from sympy import simplify
 from sympy.parsing.latex import parse_latex
+import pytesseract
+import numpy as np
+import cv2
 
-# ========== CONFIGURAÇÃO MATHPIX ==========
+# ========== CONFIG MATHPIX ==========
 MATHPIX_APP_ID = "mathmindia_ea58bf"
 MATHPIX_APP_KEY = "3330e99e78933441b0f66a816112d73c717ad7109cd93293a4ac9008572e987c"
 
@@ -30,11 +33,17 @@ def mathpix_ocr(image_bytes):
     }
     data = {
         "src": f"data:image/jpeg;base64,{image_bytes}",
-        "formats": ["snips"],
-        "ocr": ["math", "text"]
+        "formats": ["latex_styled"],
+        "snip_enabled": True
     }
     response = requests.post("https://api.mathpix.com/v3/text", json=data, headers=headers)
-    return response.json().get("snips", [])
+    result = response.json()
+    return result.get("latex_styled", ""), result.get("snips", [])
+
+def fallback_tesseract(img: Image.Image):
+    gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+    text = pytesseract.image_to_string(gray, config='--psm 6')
+    return text
 
 def extrair_gabarito_pdf(pdf_file):
     gabarito = {}
@@ -47,42 +56,54 @@ def extrair_gabarito_pdf(pdf_file):
                 gabarito[q] = [(etapa.strip(), float(peso)) for etapa, peso in etapas]
     return gabarito
 
-def imagem_para_snips(imagem):
+def imagem_para_latex(imagem):
     image = Image.open(imagem)
     buffer = BytesIO()
     image.save(buffer, format="JPEG")
     img_str = base64.b64encode(buffer.getvalue()).decode()
     return mathpix_ocr(img_str)
 
-def etapa_correspondente(etapa_gabarito, snips_list):
+def etapa_correspondente(etapa_gabarito, latex_text):
     try:
         gabarito_expr = parse_latex(etapa_gabarito)
     except:
         return False
 
-    for snip in snips_list:
-        if "latex" in snip:
-            try:
-                aluno_expr = parse_latex(snip["latex"])
-                if simplify(gabarito_expr - aluno_expr) == 0:
-                    return True
-            except:
-                continue
+    expressoes = re.findall(r'(\\\(.+?\\\))', latex_text)
+    for exp in expressoes:
+        clean = exp.strip('\\() ')
+        try:
+            aluno_expr = parse_latex(clean)
+            if simplify(gabarito_expr - aluno_expr) == 0:
+                return True
+        except:
+            continue
     return False
 
 def processar_provas(imagens, gabarito):
     resultados = []
     textos_ocr = {}
     for img in imagens:
-        snips = imagem_para_snips(img)
         aluno = os.path.splitext(img.name)[0]
-        textos_ocr[aluno] = [s.get("latex", "") for s in snips if "latex" in s]
+        st.write(f"**Fórmulas detectadas para {aluno}**")
+
+        try:
+            latex_text, snips = imagem_para_latex(img)
+            if not latex_text:
+                st.warning(f"Mathpix falhou. Usando fallback para {aluno}.")
+                latex_text = fallback_tesseract(Image.open(img))
+        except:
+            latex_text = fallback_tesseract(Image.open(img))
+
+        st.code(latex_text)
+        textos_ocr[aluno] = latex_text
+
         resultado = {"Aluno": aluno}
         nota_total = 0
         for q, etapas in gabarito.items():
             nota_q = 0
             for etapa, peso in etapas:
-                if etapa_correspondente(etapa, snips):
+                if etapa_correspondente(etapa, latex_text):
                     nota_q += peso
             resultado[q] = round(nota_q, 2)
             nota_total += nota_q
@@ -125,9 +146,8 @@ if st.button("Iniciar Correção"):
         if gabarito_file.type == "application/pdf":
             gabarito = extrair_gabarito_pdf(gabarito_file)
         else:
-            snips = imagem_para_snips(gabarito_file)
-            formulas = [s.get("latex", "") for s in snips if "latex" in s]
-            gabarito = {"Q1": [(f, 1.0) for f in formulas]}
+            latex, _ = imagem_para_latex(gabarito_file)
+            gabarito = {"Q1": [(latex, 1.0)]}
 
         st.info("Corrigindo provas...")
         resultados, textos = processar_provas(arquivos_imagem, gabarito)
@@ -144,10 +164,9 @@ if st.button("Iniciar Correção"):
         pdf = gerar_pdf_geral(resultados, professor, turma, data_prova)
         st.download_button("Baixar PDF", data=pdf, file_name="relatorio.pdf")
 
-        with st.expander("Fórmulas detectadas (LaTeX)"):
-            for aluno, formulas in textos.items():
+        with st.expander("LaTeX Detectado"):
+            for aluno, latex in textos.items():
                 st.markdown(f"**{aluno}**")
-                for f in formulas:
-                    st.code(f)
+                st.code(latex)
     else:
         st.warning("Envie o gabarito e as imagens das provas.")
